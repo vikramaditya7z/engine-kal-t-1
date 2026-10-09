@@ -17,13 +17,15 @@ No market relationship may be inferred from names, tickers, titles, or shared ev
 
 ## B. Persistent memory protocol
 
-`V1_LOOP_MEMORY.md` is the run-to-run state file for the future Goal. At the beginning of every run, in this order:
+`V1_LOOP_MEMORY.md` is the run-to-run state file for the future Goal. Before inspecting, editing, or executing anything else at the beginning of every run, read it. Then, in this order:
 
 1. Read `V1_LOOP_MEMORY.md`.
 2. Read the applicable project instructions, including `PROJECT_RULES.md` and relevant parts of `ARCHITECTURE.md`.
 3. Check the repository, working tree, tests, fixtures, and runtime state against memory.
 4. Treat repository evidence and actual command output as authoritative when they conflict with an unverified memory claim.
 5. Identify the first unfinished task and avoid repeating work already supported by evidence.
+
+Every run must skip work already verified as done, must never repeat a failed approach unchanged, and must record what was done, what worked, what failed and why, and what to do next. Update the memory file at the end of every run, including blocked or interrupted runs.
 
 This document does not create the memory file. If a future Goal starts without it, stop and request that its separately reviewed initial contents be prepared rather than silently inventing history.
 
@@ -58,6 +60,8 @@ Before each implementation task, inspect:
 Prefer the smallest justified change. Preserve existing V0 behavior and user work. Do not rewrite working components for style, add speculative abstractions, or modify unrelated files.
 
 Do not commit, push, deploy, place orders, alter external state, or perform other external writes without explicit approval. Do not delete or reset user work. If the repository is not a Git worktree, record that Git diff/status checks are unavailable and use careful file inspection instead.
+
+Preserve the existing baseline commit and history. Never force-push, rewrite history, or use destructive reset or cleanup commands such as `git reset --hard` or `git clean`. Before any push, verify the working tree and remote state; never overwrite unexpected remote changes. Use descriptive, meaningful commits for completed milestones when appropriate. Do not commit secrets, credentials, generated files, or unrelated changes. If a safe Git operation is ambiguous, stop and request human approval.
 
 ## D. Modular architecture and future extensibility
 
@@ -119,7 +123,7 @@ The future Goal may declare V1 complete only when:
 
 - every mandatory acceptance criterion is verified;
 - required focused tests, the complete offline suite, compilation, and applicable static checks pass;
-- the live smoke test passes, or a documented environment blocker is explicitly accepted without claiming live verification;
+- a current live smoke test succeeds, with recorded evidence that an actual Kalshi market response was normalized successfully; a fixture test cannot substitute for this evidence;
 - the real fixture is validated offline;
 - documentation accurately describes the implementation;
 - the final diff or changed-file review is complete;
@@ -127,6 +131,8 @@ The future Goal may declare V1 complete only when:
 - no V2, trading, or other prohibited functionality was introduced.
 
 Completion must distinguish verified completion from completion blocked by the environment. A blocked criterion is never a pass.
+
+If live market-data verification is unavailable or fails because of an environment or API blocker, V1 remains `BLOCKED`, not `COMPLETE`. The agent must pause and report the blocker rather than treating acceptance of the blocker as successful V1 completion.
 
 ## H. Emergency and blocker stop conditions
 
