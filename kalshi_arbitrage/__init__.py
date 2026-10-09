@@ -27,6 +27,8 @@ from .rest_client import (
     KalshiResponseError,
     KalshiRestClient,
     KalshiTransportError,
+    format_http_date,
+    parse_http_date,
 )
 from .arbitrage import (
     OPPORTUNITY_BINARY_PARITY,
@@ -165,6 +167,8 @@ __all__ = [
     "KalshiResponseError",
     "KalshiRestClient",
     "KalshiTransportError",
+    "format_http_date",
+    "parse_http_date",
     "OPPORTUNITY_BINARY_PARITY",
     "OPPORTUNITY_MECE_BASKET_LONG_NO",
     "OPPORTUNITY_MECE_BASKET_LONG_YES",

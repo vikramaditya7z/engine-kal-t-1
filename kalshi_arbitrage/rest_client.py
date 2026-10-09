@@ -1,6 +1,8 @@
 """Small, read-only REST client for public Kalshi market data."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import formatdate, parsedate_to_datetime
 import json
 from math import isfinite
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
@@ -24,6 +26,33 @@ DEMO_BASE_URL = "https://external-api.demo.kalshi.co/trade-api/v2"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MARKET_PAGE_SIZE = 100
 MAX_MARKET_PAGE_SIZE = 1000
+
+
+def format_http_date(dt: Optional[datetime] = None) -> str:
+    """Format a datetime (or current time if None) as an RFC 7231 HTTP Date header."""
+    ts = dt.timestamp() if dt is not None else None
+    return formatdate(timeval=ts, usegmt=True)
+
+
+def parse_http_date(value: Optional[str]) -> Optional[datetime]:
+    """Parse an RFC 7231 / RFC 2822 HTTP Date header into a timezone-aware UTC datetime.
+
+    Returns None if value is None or empty.
+    Raises ValueError if value is present but malformed.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = parsedate_to_datetime(value.strip())
+    except (TypeError, ValueError, IndexError, OverflowError) as exc:
+        raise ValueError(f"malformed HTTP Date header: {value!r}") from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt
 
 
 class KalshiClientError(Exception):
@@ -62,6 +91,15 @@ class HTTPResponse:
 
     status_code: int
     body: bytes
+    headers: Mapping[str, str] = field(default_factory=dict)
+
+    def get_header(self, name: str, default: Optional[str] = None) -> Optional[str]:
+        """Case-insensitive header lookup."""
+        target = name.lower()
+        for k, v in self.headers.items():
+            if k.lower() == target:
+                return v
+        return default
 
 
 class UrllibGetTransport:
@@ -75,10 +113,12 @@ class UrllibGetTransport:
         request = Request(request_url, method="GET", headers={"Accept": "application/json"})
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
-                return HTTPResponse(response.status, response.read())
+                headers = dict(response.headers.items()) if hasattr(response, "headers") and response.headers else {}
+                return HTTPResponse(response.status, response.read(), headers=headers)
         except HTTPError as exc:
             body = exc.read()
-            return HTTPResponse(exc.code, body)
+            headers = dict(exc.headers.items()) if hasattr(exc, "headers") and exc.headers else {}
+            return HTTPResponse(exc.code, body, headers=headers)
         except (URLError, OSError, TimeoutError) as exc:
             raise KalshiTransportError(f"GET request failed for {request_url}") from exc
 
@@ -124,7 +164,9 @@ class KalshiRestClient:
         self.timeout_seconds = float(timeout_seconds)
         self._transport = transport or UrllibGetTransport()
 
-    def _get_json(self, path: str, params: Mapping[str, str]) -> Mapping[str, Any]:
+    def _get_json_response(
+        self, path: str, params: Mapping[str, str]
+    ) -> Tuple[Mapping[str, Any], HTTPResponse]:
         url = urljoin(f"{self.base_url}/", path.lstrip("/"))
         try:
             response = self._transport.get(url, params, self.timeout_seconds)
@@ -149,7 +191,11 @@ class KalshiRestClient:
             payload = json.loads(decoded)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise KalshiJSONError(f"invalid JSON response from {url}") from exc
-        return _object(payload, "response")
+        return _object(payload, "response"), response
+
+    def _get_json(self, path: str, params: Mapping[str, str]) -> Mapping[str, Any]:
+        payload, _ = self._get_json_response(path, params)
+        return payload
 
     def list_markets(
         self,
@@ -245,6 +291,25 @@ class KalshiRestClient:
         return normalize_event(payload)
 
     def get_order_book(self, ticker: str) -> NormalizedOrderBook:
+        """Fetch and normalize order-book bid levels.
+
+        Captures the HTTP Date response header as source_timestamp.
+        Limitation: HTTP Date establishes response time, not necessarily the
+        exact snapshot-generation time or proof that an upstream cache was bypassed.
+        """
         ticker = _identifier(ticker, "ticker")
-        payload = self._get_json(f"/markets/{quote(ticker, safe='')}/orderbook", {})
-        return normalize_order_book(payload, market_ticker=ticker)
+        payload, response = self._get_json_response(
+            f"/markets/{quote(ticker, safe='')}/orderbook", {}
+        )
+        date_header = response.get_header("Date")
+        source_ts: Optional[datetime] = None
+        if date_header is not None:
+            try:
+                source_ts = parse_http_date(date_header)
+            except ValueError as exc:
+                raise MarketDataInputError(str(exc)) from exc
+        return normalize_order_book(
+            payload,
+            market_ticker=ticker,
+            source_timestamp=source_ts,
+        )

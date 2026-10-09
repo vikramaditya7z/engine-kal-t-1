@@ -164,11 +164,18 @@ class OrderBookLevel:
 
 @dataclass(frozen=True)
 class NormalizedOrderBook:
-    """Normalized bids for a single binary market."""
+    """Normalized bids for a single binary market.
+
+    source_timestamp represents the transport-level exchange timestamp (derived from
+    the HTTP Date response header). Limitation: HTTP Date establishes response time,
+    not necessarily the exact internal snapshot-generation time or proof that an
+    upstream cache was bypassed.
+    """
 
     market_ticker: str
     yes_bids: Tuple[OrderBookLevel, ...]
     no_bids: Tuple[OrderBookLevel, ...]
+    source_timestamp: Optional[datetime] = None
 
     def __post_init__(self) -> None:
         _required_text(self.market_ticker, "market_ticker")
@@ -179,6 +186,11 @@ class NormalizedOrderBook:
                 raise MarketDataInputError(f"{name} must contain OrderBookLevel objects")
             if any(left.price_dollars > right.price_dollars for left, right in zip(levels, levels[1:])):
                 raise MarketDataInputError(f"{name} must be sorted by ascending price")
+        if self.source_timestamp is not None:
+            if not isinstance(self.source_timestamp, datetime):
+                raise MarketDataInputError("source_timestamp must be a datetime or null")
+            if self.source_timestamp.tzinfo is None:
+                raise MarketDataInputError("source_timestamp must include a timezone")
 
 
 @dataclass(frozen=True)
@@ -478,7 +490,11 @@ def _normalize_orderbook_levels(value: object, name: str) -> Tuple[OrderBookLeve
     return tuple(levels)
 
 
-def normalize_order_book(payload: object, market_ticker: str) -> NormalizedOrderBook:
+def normalize_order_book(
+    payload: object,
+    market_ticker: str,
+    source_timestamp: Optional[datetime] = None,
+) -> NormalizedOrderBook:
     """Validate a raw order-book response and return exact bid levels."""
     raw = _require_mapping(payload, "order-book payload")
     orderbook = _require_mapping(raw.get("orderbook_fp"), "orderbook_fp")
@@ -486,4 +502,5 @@ def normalize_order_book(payload: object, market_ticker: str) -> NormalizedOrder
         market_ticker=_required_text(market_ticker, "market_ticker"),
         yes_bids=_normalize_orderbook_levels(orderbook.get("yes_dollars"), "yes_dollars"),
         no_bids=_normalize_orderbook_levels(orderbook.get("no_dollars"), "no_dollars"),
+        source_timestamp=source_timestamp,
     )

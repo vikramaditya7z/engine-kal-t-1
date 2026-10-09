@@ -65,7 +65,7 @@ def _iso_to_datetime(val: Optional[str]) -> Optional[datetime]:
 def _order_book_to_dict(book: Optional[NormalizedOrderBook]) -> Optional[Dict[str, Any]]:
     if book is None:
         return None
-    return {
+    d = {
         "market_ticker": book.market_ticker,
         "yes_bids": [
             {"price_dollars": str(lvl.price_dollars), "quantity": str(lvl.quantity)}
@@ -76,6 +76,9 @@ def _order_book_to_dict(book: Optional[NormalizedOrderBook]) -> Optional[Dict[st
             for lvl in book.no_bids
         ],
     }
+    if book.source_timestamp is not None:
+        d["source_timestamp"] = _datetime_to_iso(book.source_timestamp)
+    return d
 
 
 def _order_book_from_dict(d: Optional[Dict[str, Any]]) -> Optional[NormalizedOrderBook]:
@@ -97,6 +100,7 @@ def _order_book_from_dict(d: Optional[Dict[str, Any]]) -> Optional[NormalizedOrd
             )
             for item in d.get("no_bids", [])
         ),
+        source_timestamp=_iso_to_datetime(d.get("source_timestamp")),
     )
 
 

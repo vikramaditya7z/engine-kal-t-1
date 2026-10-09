@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 import pytest
 
@@ -28,6 +28,8 @@ from kalshi_arbitrage import (
     STATUS_REJECTED_STALE,
     STATUS_REJECTED_UNPROFITABLE_FEES,
     YES,
+    format_http_date,
+    parse_http_date,
 )
 
 
@@ -48,8 +50,13 @@ class FakeTransport:
         return resp
 
 
-def json_response(payload: Any, status: int = 200) -> HTTPResponse:
-    return HTTPResponse(status_code=status, body=json.dumps(payload).encode("utf-8"))
+def json_response(
+    payload: Any,
+    status: int = 200,
+    headers: Optional[Mapping[str, str]] = None,
+) -> HTTPResponse:
+    h = dict(headers) if headers is not None else {"Date": format_http_date()}
+    return HTTPResponse(status_code=status, body=json.dumps(payload).encode("utf-8"), headers=h)
 
 
 def make_market_payload(
@@ -163,10 +170,10 @@ def test_failed_refresh_does_not_reuse_stale_data():
 
 def test_stale_order_book_rejection():
     # Source timestamp from 2 hours ago
-    stale_iso = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    stale_dt = datetime.now(timezone.utc) - timedelta(hours=2)
     fake = FakeTransport([
-        json_response(make_market_payload("KX-OLD", updated_time=stale_iso)),
-        json_response(make_orderbook_payload()),
+        json_response(make_market_payload("KX-OLD")),
+        json_response(make_orderbook_payload(), headers={"Date": format_http_date(stale_dt)}),
     ])
     client = KalshiRestClient(transport=fake)
     observer = MarketObserver(
@@ -181,14 +188,10 @@ def test_stale_order_book_rejection():
 
 
 def test_missing_source_timestamp_rejection():
-    # Market without updated_time or close_time
-    market_payload = make_market_payload("KX-NOTS")
-    market_payload["market"]["updated_time"] = None
-    market_payload["market"]["close_time"] = None
-
+    # Order book response without HTTP Date header
     fake = FakeTransport([
-        json_response(market_payload),
-        json_response(make_orderbook_payload()),
+        json_response(make_market_payload("KX-NOTS")),
+        json_response(make_orderbook_payload(), headers={}),
     ])
     client = KalshiRestClient(transport=fake)
     observer = MarketObserver(
@@ -200,6 +203,100 @@ def test_missing_source_timestamp_rejection():
     assert obs.is_success is True
     assert obs.is_stale is True
     assert obs.staleness_reason == "Missing exchange source timestamp"
+
+
+def test_orderbook_date_header_valid_propagation():
+    fixed_now = datetime(2026, 10, 9, 12, 0, 5, tzinfo=timezone.utc)
+    valid_dt = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    fake = FakeTransport([
+        json_response(make_market_payload("KX-VALID")),
+        json_response(make_orderbook_payload(), headers={"Date": format_http_date(valid_dt)}),
+    ])
+    client = KalshiRestClient(transport=fake)
+    observer = MarketObserver(
+        client=client,
+        config=MarketObserverConfig(max_stale_seconds=300.0),
+        time_provider=lambda: fixed_now,
+    )
+
+    obs = observer.poll_market("KX-VALID")
+    assert obs.is_success is True
+    assert obs.is_stale is False
+    assert obs.source_timestamp == valid_dt
+    assert obs.order_book is not None
+    assert obs.order_book.source_timestamp == valid_dt
+
+
+def test_orderbook_date_header_malformed_rejection():
+    fake = FakeTransport([
+        json_response(make_market_payload("KX-MALFORMED")),
+        json_response(make_orderbook_payload(), headers={"Date": "Not-A-Valid-HTTP-Date"}),
+    ])
+    client = KalshiRestClient(transport=fake)
+    observer = MarketObserver(client=client)
+
+    obs = observer.poll_market("KX-MALFORMED")
+    assert obs.is_success is False
+    assert obs.is_stale is True
+    assert obs.source_timestamp is None
+    assert obs.staleness_reason == "Malformed exchange source timestamp"
+
+
+def test_orderbook_date_header_future_rejection():
+    fixed_now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    future_dt = fixed_now + timedelta(seconds=15)  # 15s in the future (> 10s allowed drift)
+    fake = FakeTransport([
+        json_response(make_market_payload("KX-FUT")),
+        json_response(make_orderbook_payload(), headers={"Date": format_http_date(future_dt)}),
+    ])
+    client = KalshiRestClient(transport=fake)
+    observer = MarketObserver(client=client, time_provider=lambda: fixed_now)
+
+    obs = observer.poll_market("KX-FUT")
+    assert obs.is_success is True
+    assert obs.is_stale is True
+    assert "future" in obs.staleness_reason.lower()
+
+
+def test_orderbook_freshness_independent_of_market_updated_time():
+    fixed_now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    ancient_iso = (fixed_now - timedelta(days=30)).isoformat()
+    fresh_date = format_http_date(fixed_now - timedelta(seconds=2))
+
+    # Case A: Market metadata updated 30 days ago, orderbook Date is fresh -> VALID
+    fake_fresh = FakeTransport([
+        json_response(make_market_payload("KX-DECOUPLED", updated_time=ancient_iso)),
+        json_response(make_orderbook_payload(), headers={"Date": fresh_date}),
+    ])
+    client_fresh = KalshiRestClient(transport=fake_fresh)
+    observer_fresh = MarketObserver(
+        client=client_fresh,
+        config=MarketObserverConfig(max_stale_seconds=60.0),
+        time_provider=lambda: fixed_now,
+    )
+    obs_fresh = observer_fresh.poll_market("KX-DECOUPLED")
+    assert obs_fresh.is_success is True
+    assert obs_fresh.is_stale is False
+    assert obs_fresh.source_timestamp == parse_http_date(fresh_date)
+
+    # Case B: Market metadata updated just now, orderbook Date is 2 hours old -> STALE
+    recent_iso = fixed_now.isoformat()
+    old_date = format_http_date(fixed_now - timedelta(hours=2))
+
+    fake_old = FakeTransport([
+        json_response(make_market_payload("KX-DECOUPLED", updated_time=recent_iso)),
+        json_response(make_orderbook_payload(), headers={"Date": old_date}),
+    ])
+    client_old = KalshiRestClient(transport=fake_old)
+    observer_old = MarketObserver(
+        client=client_old,
+        config=MarketObserverConfig(max_stale_seconds=60.0),
+        time_provider=lambda: fixed_now,
+    )
+    obs_old = observer_old.poll_market("KX-DECOUPLED")
+    assert obs_old.is_success is True
+    assert obs_old.is_stale is True
+    assert "stale" in obs_old.staleness_reason.lower()
 
 
 def test_binary_parity_candidate_profitable_qualification():
@@ -279,14 +376,14 @@ def test_binary_parity_insufficient_depth_rejection():
 
 def test_multi_leg_timestamp_skew_rejection():
     now = datetime.now(timezone.utc)
-    ts1 = now.isoformat()
-    ts2 = (now - timedelta(seconds=20)).isoformat()  # 20s skew
+    t1 = now
+    t2 = now - timedelta(seconds=20)  # 20s skew
 
     fake = FakeTransport([
-        json_response(make_market_payload("KX-A", yes_ask="0.30", no_ask="0.70", updated_time=ts1)),
-        json_response(make_orderbook_payload()),
-        json_response(make_market_payload("KX-B", yes_ask="0.60", no_ask="0.40", updated_time=ts2)),
-        json_response(make_orderbook_payload()),
+        json_response(make_market_payload("KX-A", yes_ask="0.30", no_ask="0.70")),
+        json_response(make_orderbook_payload(), headers={"Date": format_http_date(t1)}),
+        json_response(make_market_payload("KX-B", yes_ask="0.60", no_ask="0.40")),
+        json_response(make_orderbook_payload(), headers={"Date": format_http_date(t2)}),
     ])
     client = KalshiRestClient(transport=fake)
     basket = DeclaredMeceBasket(

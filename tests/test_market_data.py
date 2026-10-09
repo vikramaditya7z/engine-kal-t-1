@@ -5,6 +5,8 @@ import pytest
 
 from kalshi_arbitrage import (
     MarketDataInputError,
+    NormalizedOrderBook,
+    OrderBookLevel,
     normalize_event,
     normalize_market,
     normalize_order_book,
@@ -246,4 +248,40 @@ def test_order_book_levels_must_be_ascending():
                 }
             },
             "KXTEST-YES",
+        )
+
+
+def test_order_book_source_timestamp_validation():
+    payload = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.10", "1"]],
+            "no_dollars": [["0.20", "1"]],
+        }
+    }
+    valid_ts = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+
+    # Valid timezone-aware timestamp
+    book = normalize_order_book(payload, "KXTEST-YES", source_timestamp=valid_ts)
+    assert book.source_timestamp == valid_ts
+
+    # None is permitted
+    book_none = normalize_order_book(payload, "KXTEST-YES", source_timestamp=None)
+    assert book_none.source_timestamp is None
+
+    # Naive datetime must be rejected
+    naive_ts = datetime(2026, 10, 9, 12, 0, 0)
+    with pytest.raises(MarketDataInputError, match="must include a timezone"):
+        normalize_order_book(payload, "KXTEST-YES", source_timestamp=naive_ts)
+
+    # Non-datetime object must be rejected
+    with pytest.raises(MarketDataInputError, match="must be a datetime or null"):
+        normalize_order_book(payload, "KXTEST-YES", source_timestamp="2026-10-09T12:00:00Z")
+
+    # Direct NormalizedOrderBook instantiation validation
+    with pytest.raises(MarketDataInputError, match="must include a timezone"):
+        NormalizedOrderBook(
+            market_ticker="KXTEST-YES",
+            yes_bids=(OrderBookLevel(price_dollars=Decimal("0.10"), quantity=Decimal("1")),),
+            no_bids=(OrderBookLevel(price_dollars=Decimal("0.20"), quantity=Decimal("1")),),
+            source_timestamp=naive_ts,
         )

@@ -178,8 +178,13 @@ class MarketObserverConfig:
 
 @dataclass(frozen=True)
 class MarketObservation:
+    """Timestamped snapshot of a single market's order book and metadata.
 
-    """Timestamped snapshot of a single market's order book and metadata."""
+    source_timestamp is the exchange transport timestamp (derived from the HTTP Date
+    header of the order-book GET response). Limitation: HTTP Date establishes response
+    time, not necessarily the exact matching-engine snapshot generation time or proof
+    that an upstream cache was bypassed.
+    """
 
     observation_id: str
     ticker: str
@@ -360,6 +365,10 @@ class MarketObserver:
     ) -> Tuple[bool, Optional[str]]:
         """Validate order book freshness against the documented policy.
 
+        Checks the transport-level exchange timestamp (derived from the HTTP Date header).
+        Limitation: HTTP Date establishes response time, not necessarily the exact internal
+        snapshot-generation time or proof that an upstream cache was bypassed.
+
         Returns (is_stale, reason).
         """
         if book is None:
@@ -369,6 +378,9 @@ class MarketObserver:
             if self.config.require_source_timestamp:
                 return True, "Missing exchange source timestamp"
             return False, None
+
+        if not isinstance(source_timestamp, datetime):
+            return True, "Malformed exchange source timestamp"
 
         # Ensure timezone compatibility for age comparison
         obs_tz = observed_at.tzinfo
@@ -431,13 +443,11 @@ class MarketObserver:
 
         market: Optional[NormalizedMarket] = None
         book: Optional[NormalizedOrderBook] = None
-        source_ts: Optional[datetime] = None
         error_msg: Optional[str] = None
 
         self._pace_request()
         try:
             market = self.client.get_market(ticker)
-            source_ts = market.updated_time or market.close_time
         except KalshiClientError as exc:
             error_msg = f"Failed to fetch market {ticker}: {exc}"
             return MarketObservation(
@@ -475,7 +485,7 @@ class MarketObserver:
                 observation_id=obs_id,
                 ticker=ticker,
                 observed_at=now,
-                source_timestamp=source_ts,
+                source_timestamp=None,
                 market=market,
                 order_book=None,
                 is_success=False,
@@ -484,26 +494,32 @@ class MarketObserver:
                 error_message=error_msg,
             )
         except MarketDataInputError as exc:
+            reason = (
+                "Malformed exchange source timestamp"
+                if "HTTP Date" in str(exc)
+                else "Malformed order book payload"
+            )
             return MarketObservation(
                 observation_id=obs_id,
                 ticker=ticker,
                 observed_at=now,
-                source_timestamp=source_ts,
+                source_timestamp=None,
                 market=market,
                 order_book=None,
                 is_success=False,
                 is_stale=True,
-                staleness_reason="Malformed order book payload",
+                staleness_reason=reason,
                 error_message=str(exc),
             )
 
-        is_stale, stale_reason = self.check_order_book_freshness(book, source_ts, now)
+        book_source_ts = book.source_timestamp
+        is_stale, stale_reason = self.check_order_book_freshness(book, book_source_ts, now)
 
         obs = MarketObservation(
             observation_id=obs_id,
             ticker=ticker,
             observed_at=now,
-            source_timestamp=source_ts,
+            source_timestamp=book_source_ts,
             market=market,
             order_book=book,
             is_success=True,

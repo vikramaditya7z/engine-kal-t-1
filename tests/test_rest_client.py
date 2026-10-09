@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 
 import pytest
@@ -11,7 +12,10 @@ from kalshi_arbitrage import (
     KalshiResponseError,
     KalshiRestClient,
     KalshiTransportError,
+    MarketDataInputError,
     PRODUCTION_BASE_URL,
+    format_http_date,
+    parse_http_date,
 )
 
 
@@ -71,8 +75,8 @@ class FakeTransport:
         return self.responses.pop(0)
 
 
-def response(payload, status_code=200):
-    return HTTPResponse(status_code, json.dumps(payload).encode("utf-8"))
+def response(payload, status_code=200, headers=None):
+    return HTTPResponse(status_code, json.dumps(payload).encode("utf-8"), headers=headers or {})
 
 
 def client(fake):
@@ -223,3 +227,72 @@ def test_client_transport_is_get_only():
     client(fake).get_market("KX-1")
     assert len(fake.calls) == 1
     assert not hasattr(fake, "post")
+
+
+def test_parse_and_format_http_date():
+    dt = datetime(2026, 10, 9, 15, 0, 0, tzinfo=timezone.utc)
+    formatted = format_http_date(dt)
+    assert "Oct 2026" in formatted
+    assert "GMT" in formatted
+
+    parsed = parse_http_date(formatted)
+    assert parsed == dt
+    assert parsed.tzinfo == timezone.utc
+
+    assert parse_http_date(None) is None
+    assert parse_http_date("") is None
+    assert parse_http_date("   ") is None
+
+    with pytest.raises(ValueError, match="malformed HTTP Date header"):
+        parse_http_date("not-a-date")
+
+
+def test_http_response_headers_case_insensitivity():
+    resp = HTTPResponse(
+        200,
+        b"{}",
+        headers={"Date": "Fri, 09 Oct 2026 15:00:00 GMT", "Content-Type": "application/json"},
+    )
+    assert resp.get_header("date") == "Fri, 09 Oct 2026 15:00:00 GMT"
+    assert resp.get_header("DATE") == "Fri, 09 Oct 2026 15:00:00 GMT"
+    assert resp.get_header("content-type") == "application/json"
+    assert resp.get_header("missing") is None
+    assert resp.get_header("missing", "default_val") == "default_val"
+
+
+def test_get_order_book_captures_http_date_header():
+    raw_orderbook = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.4000", "10.00"]],
+            "no_dollars": [["0.5500", "5.00"]],
+        }
+    }
+    date_str = "Fri, 09 Oct 2026 15:00:00 GMT"
+    fake = FakeTransport([response(raw_orderbook, headers={"Date": date_str})])
+    result = client(fake).get_order_book("KX-1")
+    assert result.market_ticker == "KX-1"
+    assert result.source_timestamp == datetime(2026, 10, 9, 15, 0, 0, tzinfo=timezone.utc)
+
+
+def test_get_order_book_rejects_malformed_http_date_header():
+    raw_orderbook = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.4000", "10.00"]],
+            "no_dollars": [["0.5500", "5.00"]],
+        }
+    }
+    fake = FakeTransport([response(raw_orderbook, headers={"Date": "not-a-valid-date"})])
+    with pytest.raises(MarketDataInputError, match="malformed HTTP Date header"):
+        client(fake).get_order_book("KX-1")
+
+
+def test_get_order_book_missing_date_header():
+    raw_orderbook = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.4000", "10.00"]],
+            "no_dollars": [["0.5500", "5.00"]],
+        }
+    }
+    fake = FakeTransport([response(raw_orderbook, headers={})])
+    result = client(fake).get_order_book("KX-1")
+    assert result.source_timestamp is None

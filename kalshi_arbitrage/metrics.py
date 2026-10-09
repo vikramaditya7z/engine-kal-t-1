@@ -139,8 +139,11 @@ class ObserverReport:
         lines.extend([
             "=" * 64,
             "IMPORTANT DEFINITIONS & DISCLAIMERS:",
-            "- Data Freshness: Observations without exchange source timestamps or",
-            "  exceeding max_stale_seconds are classified as stale and rejected.",
+            "- Data Freshness: Evaluated against the exchange HTTP Date response header.",
+            "  Limitation: HTTP Date establishes response time, not necessarily the exact",
+            "  matching-engine snapshot generation time or proof that an upstream cache",
+            "  was bypassed. Observations without exchange source timestamps or exceeding",
+            "  max_stale_seconds are classified as stale and rejected.",
             "- Opportunity Lifetime: Measures the interval between observed first appearance",
             "  and subsequent disappearance across discrete polling cycles. It does NOT",
             "  prove continuous order-book availability between polling intervals.",

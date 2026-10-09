@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 import pytest
 
@@ -36,6 +36,7 @@ from kalshi_arbitrage import (
     STATUS_QUALIFIED,
     TradeState,
     YES,
+    format_http_date,
     replay_recorded_evidence,
 )
 
@@ -57,8 +58,13 @@ class MockTransport:
         return resp
 
 
-def resp(payload: Any, status: int = 200) -> HTTPResponse:
-    return HTTPResponse(status_code=status, body=json.dumps(payload).encode("utf-8"))
+def resp(
+    payload: Any,
+    status: int = 200,
+    headers: Optional[Mapping[str, str]] = None,
+) -> HTTPResponse:
+    h = dict(headers) if headers is not None else {"Date": format_http_date()}
+    return HTTPResponse(status_code=status, body=json.dumps(payload).encode("utf-8"), headers=h)
 
 
 def market_payload(
