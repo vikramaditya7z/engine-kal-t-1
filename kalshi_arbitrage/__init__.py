@@ -62,6 +62,43 @@ from .execution import (
     evaluate_portfolio_execution,
     traverse_order_book_depth,
 )
+from .paper_trade import (
+    PaperTrade,
+    TradeLeg,
+    TradeLifecycleError,
+    TradeState,
+    create_proposed_trade,
+)
+from .paper_executor import PaperExecutionEngine, PaperExecutionError
+from .ledger import (
+    DuplicateTradeError,
+    InsufficientCashError,
+    LedgerEntry,
+    LedgerEntryType,
+    LedgerError,
+    PaperPortfolio,
+    PositionDelta,
+    PositionHolding,
+    ReconciliationResult,
+)
+from .risk import RiskCheckResult, RiskConfig, RiskError, RiskManager
+from .persistence import (
+    SCHEMA_VERSION,
+    CorruptedStateError,
+    PersistenceError,
+    ReconciliationRecoveryError,
+    load_state,
+    save_state,
+)
+from .replay import (
+    EVENT_TYPE_OPPORTUNITY,
+    EVENT_TYPE_SETTLEMENT,
+    ReplayEngine,
+    ReplayError,
+    ReplayEvent,
+    ReplayMetrics,
+    ReplayReport,
+)
 
 __all__ = [
     "BinaryContract",
@@ -126,4 +163,37 @@ __all__ = [
     "evaluate_mece_basket_execution",
     "evaluate_portfolio_execution",
     "traverse_order_book_depth",
+    "PaperTrade",
+    "TradeLeg",
+    "TradeLifecycleError",
+    "TradeState",
+    "create_proposed_trade",
+    "PaperExecutionEngine",
+    "PaperExecutionError",
+    "DuplicateTradeError",
+    "InsufficientCashError",
+    "LedgerEntry",
+    "LedgerEntryType",
+    "LedgerError",
+    "PaperPortfolio",
+    "PositionDelta",
+    "PositionHolding",
+    "ReconciliationResult",
+    "RiskCheckResult",
+    "RiskConfig",
+    "RiskError",
+    "RiskManager",
+    "SCHEMA_VERSION",
+    "CorruptedStateError",
+    "PersistenceError",
+    "ReconciliationRecoveryError",
+    "load_state",
+    "save_state",
+    "EVENT_TYPE_OPPORTUNITY",
+    "EVENT_TYPE_SETTLEMENT",
+    "ReplayEngine",
+    "ReplayError",
+    "ReplayEvent",
+    "ReplayMetrics",
+    "ReplayReport",
 ]
