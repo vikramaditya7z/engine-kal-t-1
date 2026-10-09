@@ -175,11 +175,30 @@ def test_malformed_response_envelopes_are_rejected(payload):
         client(fake).get_market("KX-1")
 
 
-@pytest.mark.parametrize("method, argument", [("get_market", ""), ("get_event", None)])
+@pytest.mark.parametrize(
+    "method, argument",
+    [("get_market", ""), ("get_event", None), ("get_order_book", "")],
+)
 def test_identifiers_are_validated(method, argument):
     fake = FakeTransport()
     with pytest.raises(ValueError):
         getattr(client(fake), method)(argument)
+
+
+def test_get_order_book_normalizes_envelope():
+    raw_orderbook = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.4000", "10.00"]],
+            "no_dollars": [["0.5500", "5.00"]],
+        }
+    }
+    fake = FakeTransport([response(raw_orderbook)])
+    result = client(fake).get_order_book("KX-1")
+    assert result.market_ticker == "KX-1"
+    assert len(result.yes_bids) == 1
+    assert len(result.no_bids) == 1
+    assert fake.calls[0][0].endswith("/markets/KX-1/orderbook")
+    assert fake.calls[0][1] == {}
 
 
 def test_client_transport_is_get_only():

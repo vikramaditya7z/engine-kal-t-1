@@ -1,6 +1,6 @@
 """Core mathematical models for the Kalshi Arbitrage Engine."""
 
-from .contract import BinaryContract, ContractInputError, gross_profit_loss_cents
+from .contract import BinaryContract, ContractInputError, NO, YES, gross_profit_loss_cents
 from .portfolio import Event, Position, Portfolio, portfolio_payout_cents, portfolio_payouts_cents
 from .market_data import (
     MarketDataInputError,
@@ -43,10 +43,31 @@ from .arbitrage import (
     evaluate_mece_markets,
     evaluate_portfolio,
 )
+from .execution import (
+    STATUS_DEPTH_SUPPORTED_GROSS_POSITIVE,
+    STATUS_DEPTH_SUPPORTED_NET_PROFITABLE,
+    STATUS_DEPTH_SUPPORTED_NET_UNPROFITABLE,
+    STATUS_INSUFFICIENT_DEPTH,
+    STATUS_INVALID_INPUT,
+    STATUS_NO_GROSS_EDGE,
+    STATUS_PARTIALLY_SUPPORTED,
+    AskLevel,
+    ConsumedLevel,
+    DepthTraversalResult,
+    ExecutionError,
+    ExecutionPricingResult,
+    derive_ask_levels,
+    evaluate_binary_parity_execution,
+    evaluate_mece_basket_execution,
+    evaluate_portfolio_execution,
+    traverse_order_book_depth,
+)
 
 __all__ = [
     "BinaryContract",
     "ContractInputError",
+    "NO",
+    "YES",
     "Event",
     "Position",
     "Portfolio",
@@ -88,4 +109,21 @@ __all__ = [
     "evaluate_mece_event_basket",
     "evaluate_mece_markets",
     "evaluate_portfolio",
+    "AskLevel",
+    "ConsumedLevel",
+    "DepthTraversalResult",
+    "ExecutionError",
+    "ExecutionPricingResult",
+    "STATUS_DEPTH_SUPPORTED_GROSS_POSITIVE",
+    "STATUS_DEPTH_SUPPORTED_NET_PROFITABLE",
+    "STATUS_DEPTH_SUPPORTED_NET_UNPROFITABLE",
+    "STATUS_INSUFFICIENT_DEPTH",
+    "STATUS_INVALID_INPUT",
+    "STATUS_NO_GROSS_EDGE",
+    "STATUS_PARTIALLY_SUPPORTED",
+    "derive_ask_levels",
+    "evaluate_binary_parity_execution",
+    "evaluate_mece_basket_execution",
+    "evaluate_portfolio_execution",
+    "traverse_order_book_depth",
 ]

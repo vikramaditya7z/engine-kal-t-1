@@ -9,11 +9,13 @@ from urllib.parse import urlencode, urljoin, quote
 from urllib.request import Request, urlopen
 
 from .market_data import (
+    MarketDataInputError,
     NormalizedEvent,
     NormalizedMarket,
-    MarketDataInputError,
+    NormalizedOrderBook,
     normalize_event,
     normalize_market,
+    normalize_order_book,
 )
 
 
@@ -224,3 +226,8 @@ class KalshiRestClient:
             for nested_market in nested_markets:
                 normalize_market(_object(nested_market, "event market"))
         return normalize_event(payload)
+
+    def get_order_book(self, ticker: str) -> NormalizedOrderBook:
+        ticker = _identifier(ticker, "ticker")
+        payload = self._get_json(f"/markets/{quote(ticker, safe='')}/orderbook", {})
+        return normalize_order_book(payload, market_ticker=ticker)

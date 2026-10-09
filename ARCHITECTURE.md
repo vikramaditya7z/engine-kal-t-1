@@ -25,11 +25,11 @@ The versions extend one codebase. Each version should deliver only the capabilit
 
 The strategy layer consumes stable, normalized domain objects—not raw REST or WebSocket response objects. Adapters may change as API details are learned, while domain and strategy logic remain insulated from transport-specific schemas.
 
-Today, the implemented flow reaches candidate arbitrage detection:
+Today, the implemented flow reaches execution-cost evaluation:
 
-`public REST response → transport/error handling → validation and normalization → normalized market or event model → contract/portfolio payoff model → arbitrage detection`
+`public REST response → transport/error handling → validation and normalization → normalized market, event, or order-book model → contract/portfolio payoff model → arbitrage detection → execution pricing & depth evaluation`
 
-The V2 arbitrage detection engine bridges normalized market data to the deterministic V0 contract and portfolio payoff models. It does not perform execution-cost evaluation, paper execution, or live order placement.
+The V2 arbitrage detection engine bridges normalized market data to the deterministic V0 contract and portfolio payoff models. The V3 execution pricing layer evaluates those candidates against observable order-book depth and explicit fees. Neither performs paper execution, account balance tracking, or live order placement.
 
 ## Eventual component responsibilities and boundaries
 
@@ -47,7 +47,7 @@ Strategy detection, execution simulation, and accounting are separate responsibi
 
 ## Technology direction
 
-Python is the implementation language and `pytest` is used for offline tests. The current V1 REST client uses the Python standard library and exposes read-only GET access to production or demo Kalshi REST endpoints for market listing, a single market, and a single event. It has finite timeouts, explicit HTTP/transport/JSON/envelope errors, and cursor-loop protection. It has no authentication, retry policy, WebSocket support, or order placement.
+Python is the implementation language and `pytest` is used for offline tests. The current REST client uses the Python standard library and exposes read-only GET access to production or demo Kalshi REST endpoints for market listing, a single market, a single event, and an order book. It has finite timeouts, explicit HTTP/transport/JSON/envelope errors, and cursor-loop protection. It has no authentication, retry policy, WebSocket support, or order placement.
 
 Normalized API prices and quantities use `Decimal` without float parsing or silent rounding. V0 settlement payouts remain integer cents. A recorded real market response supports deterministic offline normalization tests; the smoke script makes one public market request and refreshes that fixture only after successful normalization. Storage for historical replay remains a later decision.
 
@@ -68,11 +68,11 @@ Normalized API prices and quantities use `Decimal` without float parsing or sile
 
 - **V0 contract/payoff model:** `contract.py` models deterministic binary settlement and gross P/L using integer cents. `portfolio.py` evaluates finite-outcome event portfolios only when the mutually exclusive and collectively exhaustive relationship is explicitly declared.
 - **V1 normalized market-data model:** `market_data.py` validates binary market and event metadata, timestamps, exact `Decimal` prices and quantities, and order-book levels without allowing raw API dictionaries into future strategy code. Unknown lifecycle statuses are preserved as raw status strings rather than treated as open. Event `mutually_exclusive` metadata is preserved, but collective exhaustiveness and cross-market settlement relationships are never inferred.
-- **V1 public REST boundary:** `rest_client.py` supplies a small GET-only client for listing markets with explicit cursor pagination and for fetching one market or event. Each payload is validated and normalized before it is returned. Malformed data is surfaced as an error rather than silently discarded.
+- **V1 public REST boundary:** `rest_client.py` supplies a small GET-only client for listing markets with explicit cursor pagination and for fetching one market, event, or order book (`get_order_book`). Each payload is validated and normalized before it is returned. Malformed data is surfaced as an error rather than silently discarded.
 - **V2 arbitrage detection engine:** `arbitrage.py` evaluates mathematically valid candidate opportunities for single-market binary complement parity and explicitly established MECE event baskets. Exact price conversions ensure no precision loss between `Decimal` dollars and integer cents. Opportunities report worst-case guaranteed payouts across all states, total costs, and gross edge, explicitly qualifying that executability and net profitability are unverified. Relationships are never inferred from market titles or tickers.
-- **Verification assets:** pytest coverage includes V0 settlement behavior, V1 market-data validation, REST fake-transport behavior, a captured public market fixture, and V2 deterministic arbitrage detection across valid, break-even, losing, and malformed candidates.
+- **V3 execution-pricing layer:** `execution.py` evaluates candidate opportunities against actual order-book depth, supported quantities, partial fills, slippage, and explicit caller-supplied fees. It derives complementary ask levels ($P_{\text{ask}} = 100 - P_{\text{bid}}$) strictly from resting counter-party bids according to Kalshi's binary contract settlement invariants. Depth traversal walks price levels in price priority order to compute exact volume-weighted total acquisition costs in integer cents. Evaluates binary parity (`evaluate_binary_parity_execution`), MECE event baskets (`evaluate_mece_basket_execution`), and general portfolios (`evaluate_portfolio_execution`). Multi-leg evaluation deterministically identifies common bottleneck quantities across legs, re-traversing depth at the common supported scale so partial fills reflect true available depth without leg desynchronization. Results are classified explicitly into `STATUS_DEPTH_SUPPORTED_NET_PROFITABLE`, `STATUS_DEPTH_SUPPORTED_GROSS_POSITIVE`, `STATUS_DEPTH_SUPPORTED_NET_UNPROFITABLE`, `STATUS_PARTIALLY_SUPPORTED`, `STATUS_INSUFFICIENT_DEPTH`, `STATUS_NO_GROSS_EDGE`, and `STATUS_INVALID_INPUT`.
+- **Verification assets:** pytest coverage includes V0 settlement behavior, V1 market-data validation, REST fake-transport behavior, a captured public market fixture, V2 deterministic arbitrage detection, and V3 execution pricing across depth traversal, slippage, multi-leg bottlenecks, fees, and invalid books.
 
 ### Still planned
 
-WebSockets, live order-book retrieval, authentication, order placement, execution-cost pricing, risk controls, paper execution, ledgering, historical replay, and advanced research are not implemented. Implementation should continue to add only the smallest tested capability required by the active roadmap milestone.
-
+WebSockets, authentication, order placement, risk controls, paper execution, ledgering, historical replay, and advanced research are not implemented. Implementation should continue to add only the smallest tested capability required by the active roadmap milestone.
