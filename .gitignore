@@ -1,0 +1,19 @@
+# Local environments and secrets
+.venv/
+.env
+.env.*
+!.env.example
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# macOS and local logs
+.DS_Store
+*.log
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3

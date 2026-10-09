@@ -1,0 +1,134 @@
+{
+  "market": {
+    "can_close_early": true,
+    "close_time": "2026-10-23T13:10:00Z",
+    "created_time": "2026-10-09T10:19:49.399503Z",
+    "custom_strike": {
+      "Associated Events": "KXITFMATCH-26OCT09BACGAR,KXITFMATCH-26OCT09BRELAZ,KXITFMATCH-26OCT09BREMIS,KXITFMATCH-26OCT09ECHWIE,KXITFMATCH-26OCT09EICSES,KXITFMATCH-26OCT09HEMVAN,KXITFMATCH-26OCT09MARCAL,KXITFMATCH-26OCT09MILKUP,KXITFMATCH-26OCT09PERMAK,KXWTACHALLENGERMATCH-26OCT09AKSCRA,KXWTACHALLENGERMATCH-26OCT09ANDBLI,KXWTACHALLENGERMATCH-26OCT09STEIAT,KXWTACHALLENGERMATCH-26OCT09WALSAK",
+      "Associated Market Sides": "yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes",
+      "Associated Markets": "KXITFMATCH-26OCT09BACGAR-GAR,KXITFMATCH-26OCT09BRELAZ-LAZ,KXITFMATCH-26OCT09BREMIS-MIS,KXITFMATCH-26OCT09ECHWIE-WIE,KXITFMATCH-26OCT09EICSES-SES,KXITFMATCH-26OCT09HEMVAN-HEM,KXITFMATCH-26OCT09MARCAL-CAL,KXITFMATCH-26OCT09MILKUP-MIL,KXITFMATCH-26OCT09PERMAK-MAK,KXWTACHALLENGERMATCH-26OCT09AKSCRA-CRA,KXWTACHALLENGERMATCH-26OCT09ANDBLI-BLI,KXWTACHALLENGERMATCH-26OCT09STEIAT-STE,KXWTACHALLENGERMATCH-26OCT09WALSAK-SAK",
+      "Multivariate Event Ticker": "KXMVECROSSCATEGORY-S2026076E9F71E32"
+    },
+    "event_ticker": "KXMVECROSSCATEGORY-S2026076E9F71E32",
+    "exchange_index": 1,
+    "expected_expiration_time": "2026-10-09T19:10:00Z",
+    "expiration_time": "2026-10-23T13:10:00Z",
+    "expiration_value": "",
+    "is_provisional": true,
+    "last_price_dollars": "0.0000",
+    "latest_expiration_time": "2026-10-23T13:10:00Z",
+    "market_type": "binary",
+    "mve_collection_ticker": "KXMVECROSSCATEGORY-R",
+    "mve_selected_legs": [
+      {
+        "event_ticker": "KXITFMATCH-26OCT09BACGAR",
+        "market_ticker": "KXITFMATCH-26OCT09BACGAR-GAR",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09BRELAZ",
+        "market_ticker": "KXITFMATCH-26OCT09BRELAZ-LAZ",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09BREMIS",
+        "market_ticker": "KXITFMATCH-26OCT09BREMIS-MIS",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09ECHWIE",
+        "market_ticker": "KXITFMATCH-26OCT09ECHWIE-WIE",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09EICSES",
+        "market_ticker": "KXITFMATCH-26OCT09EICSES-SES",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09HEMVAN",
+        "market_ticker": "KXITFMATCH-26OCT09HEMVAN-HEM",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09MARCAL",
+        "market_ticker": "KXITFMATCH-26OCT09MARCAL-CAL",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09MILKUP",
+        "market_ticker": "KXITFMATCH-26OCT09MILKUP-MIL",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXITFMATCH-26OCT09PERMAK",
+        "market_ticker": "KXITFMATCH-26OCT09PERMAK-MAK",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXWTACHALLENGERMATCH-26OCT09AKSCRA",
+        "market_ticker": "KXWTACHALLENGERMATCH-26OCT09AKSCRA-CRA",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXWTACHALLENGERMATCH-26OCT09ANDBLI",
+        "market_ticker": "KXWTACHALLENGERMATCH-26OCT09ANDBLI-BLI",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXWTACHALLENGERMATCH-26OCT09STEIAT",
+        "market_ticker": "KXWTACHALLENGERMATCH-26OCT09STEIAT-STE",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXWTACHALLENGERMATCH-26OCT09WALSAK",
+        "market_ticker": "KXWTACHALLENGERMATCH-26OCT09WALSAK-SAK",
+        "side": "yes"
+      }
+    ],
+    "no_ask_dollars": "1.0000",
+    "no_bid_dollars": "1.0000",
+    "no_sub_title": "yes Alejandro Garcia Carbajal,yes George Lazarov,yes Giannicola Misasi,yes Luca Wiedenmann,yes Ziga Sesko,yes Calvin Hemery,yes Sergio Callejon Hernando,yes Iannis Miletich,yes Peter Makk,yes Fiona Crawley,yes Anna Blinkova,yes Lucrezia Stefanini,yes Himeno Sakatsume",
+    "notional_value_dollars": "1.0000",
+    "open_interest_fp": "0.00",
+    "open_time": "2026-10-09T10:19:49Z",
+    "previous_price_dollars": "0.0000",
+    "previous_yes_ask_dollars": "0.0000",
+    "previous_yes_bid_dollars": "0.0000",
+    "price_level_structure": "center_deci_edge_centi_cent",
+    "price_ranges": [
+      {
+        "end": "0.0100",
+        "start": "0.0000",
+        "step": "0.0001"
+      },
+      {
+        "end": "0.9900",
+        "start": "0.0100",
+        "step": "0.0010"
+      },
+      {
+        "end": "1.0000",
+        "start": "0.9900",
+        "step": "0.0001"
+      }
+    ],
+    "result": "",
+    "rules_primary": "",
+    "rules_secondary": "Kalshi is not affiliated, associated, authorized, endorsed by, or in any way officially connected with the Governing League. All trademarks, logos, and brand names are the property of their respective owners.",
+    "settlement_bounds_type": "default",
+    "settlement_timer_seconds": 5,
+    "status": "active",
+    "strike_type": "custom",
+    "ticker": "KXMVECROSSCATEGORY-S2026076E9F71E32-F3D8E2450CB",
+    "title": "yes Alejandro Garcia Carbajal,yes George Lazarov,yes Giannicola Misasi,yes Luca Wiedenmann,yes Ziga Sesko,yes Calvin Hemery,yes Sergio Callejon Hernando,yes Iannis Miletich,yes Peter Makk,yes Fiona Crawley,yes Anna Blinkova,yes Lucrezia Stefanini,yes Himeno Sakatsume",
+    "updated_time": "2026-10-09T10:19:49.572186Z",
+    "volume_24h_fp": "0.00",
+    "volume_fp": "0.00",
+    "yes_ask_dollars": "0.0000",
+    "yes_ask_size_fp": "0.00",
+    "yes_bid_dollars": "0.0000",
+    "yes_bid_size_fp": "0.00",
+    "yes_sub_title": "yes Alejandro Garcia Carbajal,yes George Lazarov,yes Giannicola Misasi,yes Luca Wiedenmann,yes Ziga Sesko,yes Calvin Hemery,yes Sergio Callejon Hernando,yes Iannis Miletich,yes Peter Makk,yes Fiona Crawley,yes Anna Blinkova,yes Lucrezia Stefanini,yes Himeno Sakatsume"
+  }
+}

@@ -1,0 +1,63 @@
+"""Core mathematical models for the Kalshi Arbitrage Engine."""
+
+from .contract import BinaryContract, ContractInputError, gross_profit_loss_cents
+from .portfolio import Event, Position, Portfolio, portfolio_payout_cents, portfolio_payouts_cents
+from .market_data import (
+    MarketDataInputError,
+    NormalizedEvent,
+    NormalizedMarket,
+    NormalizedOrderBook,
+    OrderBookLevel,
+    PriceRange,
+    SettlementSource,
+    normalize_event,
+    normalize_market,
+    normalize_order_book,
+    parse_price_dollars,
+    parse_quantity,
+)
+from .rest_client import (
+    DEMO_BASE_URL,
+    PRODUCTION_BASE_URL,
+    HTTPResponse,
+    KalshiClientError,
+    KalshiHTTPError,
+    KalshiJSONError,
+    KalshiPaginationError,
+    KalshiResponseError,
+    KalshiRestClient,
+    KalshiTransportError,
+)
+
+__all__ = [
+    "BinaryContract",
+    "ContractInputError",
+    "Event",
+    "Position",
+    "Portfolio",
+    "gross_profit_loss_cents",
+    "portfolio_payout_cents",
+    "portfolio_payouts_cents",
+    "MarketDataInputError",
+    "NormalizedEvent",
+    "NormalizedMarket",
+    "NormalizedOrderBook",
+    "OrderBookLevel",
+    "PriceRange",
+    "SettlementSource",
+    "normalize_event",
+    "normalize_market",
+    "normalize_order_book",
+    "parse_price_dollars",
+    "parse_quantity",
+    "DEMO_BASE_URL",
+    "PRODUCTION_BASE_URL",
+    "HTTPResponse",
+    "KalshiClientError",
+    "KalshiHTTPError",
+    "KalshiJSONError",
+    "KalshiPaginationError",
+    "KalshiResponseError",
+    "KalshiRestClient",
+    "KalshiTransportError",
+]
