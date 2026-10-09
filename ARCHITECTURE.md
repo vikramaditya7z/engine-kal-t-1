@@ -78,7 +78,12 @@ Normalized API prices and quantities use `Decimal` without float parsing or sile
   - `risk.py`: Pre-trade risk controls (`RiskConfig`, `RiskManager`) evaluating capital, per-trade cost, position size, aggregate exposure, and edge limits before simulated acceptance.
   - `persistence.py`: Atomic state persistence with schema versioning (`1.0`) and automated crash recovery with fail-closed ledger reconciliation and trade-to-ledger cross-validation.
   - `replay.py`: Deterministic historical chronological replay engine (`ReplayEngine`) calculating book-value equity curves (`cash + cost_basis`), maximum drawdowns, and audit reports without look-ahead bias.
-- **Verification assets:** pytest coverage includes V0 settlement behavior, V1 market-data validation, REST fake-transport behavior, a captured public market fixture, V2 deterministic arbitrage detection, V3 execution pricing across depth traversal, and V4 complete paper-trading lifecycle, ledger, risk, persistence, and replay suites.
+- **V5 live market observer & opportunity evaluation:**
+  - `observer.py`: Continuous read-only public market observer (`MarketObserver`, `MarketObserverConfig`, `MarketObservation`, `EvaluatedOpportunity`) connecting public REST polling to V2 detection and V3 execution pricing. Enforces explicit freshness policies (rejecting books missing source timestamps or exceeding max staleness), validates multi-leg snapshot consistency (rejecting combinations exceeding leg timestamp skew tolerances), and provides opportunity-level deduplication to prevent duplicate paper trade submissions across poll cycles.
+  - `evidence_storage.py`: Crash-resilient, schema-versioned (`1.0`) file storage (`EvidenceStore`) persisting timestamped observations and evaluated opportunities with atomic writes and offline replay capability (`replay_recorded_evidence`).
+  - `metrics.py`: Structured metrics (`ObserverMetrics`) and auditable evaluation reporting (`ObserverReport`) tracking API reliability, rejections by stage, edge and depth distributions, and observation-based opportunity lifetimes.
+  - `scripts/run_observer.py`: Read-only CLI entry point with clean signal handling and summary report generation.
+- **Verification assets:** pytest coverage includes V0 settlement behavior, V1 market-data validation, REST fake-transport behavior, a captured public market fixture, V2 deterministic arbitrage detection, V3 execution pricing across depth traversal, V4 complete paper-trading lifecycle, ledger, risk, persistence, and replay suites, and V5 continuous observation, evidence persistence, metrics, and end-to-end integration suites.
 
 ### Still planned
 

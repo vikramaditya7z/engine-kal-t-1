@@ -159,12 +159,20 @@ class KalshiRestClient:
         event_ticker: Optional[str] = None,
         series_ticker: Optional[str] = None,
         status: Optional[str] = None,
+        max_markets: Optional[int] = None,
     ) -> Tuple[NormalizedMarket, ...]:
-        """Fetch and normalize all market pages from the requested starting cursor."""
+        """Fetch and normalize market pages from the requested starting cursor.
+
+        If max_markets is specified, pagination stops once at least max_markets
+        have been retrieved.
+        """
         if isinstance(limit, bool) or not isinstance(limit, int):
             raise ValueError("limit must be an integer")
         if not 0 <= limit <= MAX_MARKET_PAGE_SIZE:
             raise ValueError(f"limit must be between 0 and {MAX_MARKET_PAGE_SIZE}")
+        if max_markets is not None:
+            if isinstance(max_markets, bool) or not isinstance(max_markets, int) or max_markets <= 0:
+                raise ValueError("max_markets must be a positive integer")
         if cursor is not None:
             _identifier(cursor, "cursor")
         filters = (("event_ticker", event_ticker), ("series_ticker", series_ticker), ("status", status))
@@ -176,7 +184,13 @@ class KalshiRestClient:
         seen_cursors = set()
         next_cursor = cursor
         while True:
-            params: Dict[str, str] = {"limit": str(limit)}
+            effective_limit = limit
+            if max_markets is not None:
+                remaining = max_markets - len(markets)
+                if remaining <= 0:
+                    break
+                effective_limit = min(limit, remaining)
+            params: Dict[str, str] = {"limit": str(effective_limit)}
             for name, value in filters:
                 if value is not None:
                     params[name] = value
@@ -189,6 +203,8 @@ class KalshiRestClient:
             for raw_market in raw_markets:
                 try:
                     markets.append(normalize_market(_object(raw_market, "market")))
+                    if max_markets is not None and len(markets) >= max_markets:
+                        return tuple(markets[:max_markets])
                 except MarketDataInputError:
                     raise
             returned_cursor = payload.get("cursor")
@@ -201,6 +217,7 @@ class KalshiRestClient:
             seen_cursors.add(returned_cursor)
             next_cursor = returned_cursor
         return tuple(markets)
+
 
     def get_market(self, ticker: str) -> NormalizedMarket:
         ticker = _identifier(ticker, "ticker")

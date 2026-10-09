@@ -115,6 +115,23 @@ def test_list_markets_follows_cursor_until_empty():
     assert fake.calls[1][1]["cursor"] == "next"
 
 
+def test_list_markets_max_markets_bounds_pagination():
+    fake = FakeTransport(
+        [
+            response({"markets": [market("KX-1"), market("KX-2")], "cursor": "next"}),
+            response({"markets": [market("KX-3"), market("KX-4")], "cursor": "next2"}),
+        ]
+    )
+    # Asking for max_markets=3 should fetch page 1 and page 2, returning exactly 3 items
+    result = client(fake).list_markets(limit=2, max_markets=3)
+    assert len(result) == 3
+    assert [item.ticker for item in result] == ["KX-1", "KX-2", "KX-3"]
+    assert len(fake.calls) == 2
+    # Verify effective limit on page 2 was clamped to remaining needed (1)
+    assert fake.calls[1][1]["limit"] == "1"
+
+
+
 def test_repeated_cursor_is_rejected():
     fake = FakeTransport([response({"markets": [], "cursor": "same"})])
     with pytest.raises(KalshiPaginationError):
