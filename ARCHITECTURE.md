@@ -13,8 +13,8 @@ This document describes both the intended direction and the currently implemente
 - **V2 — Arbitrage Detection:** Detect mathematically valid opportunities between appropriately related contracts.
 - **V3 — Execution Pricing:** Account for order-book depth, fees, liquidity, and execution costs.
 - **V4 — Paper Trading:** Simulate orders and maintain an auditable paper-trading ledger.
-- **V5 — Historical Replay:** Replay historical or recorded market events chronologically and evaluate strategy performance without look-ahead bias.
-- **V6 — Live Paper Trading:** Run against live market data with simulated execution.
+- **V5 — Live Market Observer & Evidence Persistence:** Continuous read-only public market observer, candidate evaluation, and durable evidence capture.
+- **V6 — Historical Opportunity Evaluation & Paper-Trading Performance:** Deterministic research workflow, dataset validation, liquidity and fee evaluation, simulated paper performance, and execution sensitivity analysis.
 - **V7+ — Advanced Research:** Explore payoff optimization, linear programming, additional contract relationships, temporal opportunities, market making, and optional live execution.
 
 The versions extend one codebase. Each version should deliver only the capabilities needed for that milestone.
@@ -83,7 +83,10 @@ Normalized API prices and quantities use `Decimal` without float parsing or sile
   - `evidence_storage.py`: Crash-resilient, schema-versioned (`1.0`) file storage (`EvidenceStore`) persisting timestamped observations and evaluated opportunities with atomic writes and offline replay capability (`replay_recorded_evidence`).
   - `metrics.py`: Structured metrics (`ObserverMetrics`) and auditable evaluation reporting (`ObserverReport`) tracking API reliability, rejections by stage, edge and depth distributions, and observation-based opportunity lifetimes.
   - `scripts/run_observer.py`: Read-only CLI entry point with clean signal handling and summary report generation.
-- **Verification assets:** pytest coverage includes V0 settlement behavior, V1 market-data validation, REST fake-transport behavior, a captured public market fixture, V2 deterministic arbitrage detection, V3 execution pricing across depth traversal, V4 complete paper-trading lifecycle, ledger, risk, persistence, and replay suites, and V5 continuous observation, evidence persistence, metrics, and end-to-end integration suites.
+- **V6 historical opportunity evaluation & paper-trading performance:**
+  - `evaluation.py`: Deterministic historical evaluation engine (`HistoricalEvaluator`, `EvaluationConfig`, `HistoricalDataset`, `OpportunityEvaluationRecord`, `EvaluationMetrics`, `EvaluationReport`, `SensitivityProfile`, `SensitivityReport`). Evaluates recorded observations without look-ahead bias, enforces strict freshness and timestamp-skew safeguards, derives executable depth and volume-weighted execution costs under explicit fee assumptions, simulates paper-trading performance with exact ledger accounting and automated reconciliation, and performs multi-dimensional sensitivity sweeps across fee, freshness, haircut, and depth parameters.
+  - `scripts/evaluate_historical.py`: Read-only CLI tool for running historical evaluation and parameter sensitivity analysis on recorded evidence.
+- **Verification assets:** pytest coverage includes V0 settlement behavior, V1 market-data validation, REST fake-transport behavior, a captured public market fixture, V2 deterministic arbitrage detection, V3 execution pricing across depth traversal, V4 complete paper-trading lifecycle, ledger, risk, persistence, and replay suites, V5 continuous observation, evidence persistence, metrics, and end-to-end integration suites, and V6 historical opportunity evaluation, dataset validation, paper-trading simulation, and sensitivity analysis suites.
 
 ### Still planned
 

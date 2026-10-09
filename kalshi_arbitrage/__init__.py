@@ -133,6 +133,20 @@ from .metrics import (
     ObserverReport,
     compute_observer_metrics,
 )
+from .evaluation import (
+    EvaluationConfig,
+    EvaluationError,
+    EvaluationMetrics,
+    EvaluationReport,
+    HistoricalDataset,
+    HistoricalEvaluator,
+    OpportunityEvaluationRecord,
+    SensitivityProfile,
+    SensitivityReport,
+    SensitivityRow,
+    evaluate_historical_evidence,
+    run_sensitivity_analysis,
+)
 
 __all__ = [
     "BinaryContract",
@@ -258,4 +272,16 @@ __all__ = [
     "ObserverMetrics",
     "ObserverReport",
     "compute_observer_metrics",
+    "EvaluationConfig",
+    "EvaluationError",
+    "EvaluationMetrics",
+    "EvaluationReport",
+    "HistoricalDataset",
+    "HistoricalEvaluator",
+    "OpportunityEvaluationRecord",
+    "SensitivityProfile",
+    "SensitivityReport",
+    "SensitivityRow",
+    "evaluate_historical_evidence",
+    "run_sensitivity_analysis",
 ]
