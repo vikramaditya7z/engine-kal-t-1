@@ -4,7 +4,7 @@
 
 Repository evidence confirms the V0 contract/portfolio models and V1 market-data normalization, GET-only REST client, smoke script, offline tests, and real fixture at `tests/fixtures/kalshi_market_response.json`. Compilation passed with `PYTHONPYCACHEPREFIX=/tmp/kalshi-pycache .venv/bin/python -m compileall -q kalshi_arbitrage scripts tests` (exit 0). The full suite passed with `.venv/bin/python -m pytest -q`: `115 passed in 0.10s`; the fixture test passed with `.venv/bin/python -m pytest -q tests/test_market_fixture.py`: `1 passed in 0.02s`. V1 is not complete.
 
-The preparation baseline is committed as `dc769a7b412ec966962f5ec2216955594b9863db` (`chore: establish Kalshi project baseline`) on branch `main`. Local `HEAD` and `origin/main` matched after the push, and `git status --short --branch` showed a clean working tree. This preparation updated the loop guidelines and this memory file only; application source, tests, and fixtures remain unchanged.
+The preparation baseline is committed as `dc769a7b412ec966962f5ec2216955594b9863db` (`chore: establish Kalshi project baseline`) on branch `main`. The pre-loop documentation updates were committed as `8a38b8beead6ef57b7fc7bd6f6323540ba274c8c` (`docs: finalize V1 loop safeguards`) and pushed normally to `origin/main`. Remote verification matched the local commit after the push. The working tree was clean after the documentation commit; this memory update is the only subsequent change and will be committed separately. Application source, tests, and fixtures remain unchanged.
 
 ### Worked
 
