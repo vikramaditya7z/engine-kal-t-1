@@ -102,20 +102,20 @@ Classify DNS, proxy, sandbox, API availability, credentials, and similar failure
 
 Every criterion must be marked `PASS`, `FAIL`, `BLOCKED`, or `NOT YET VERIFIED`. No criterion may be marked `PASS` without evidence from the current repository and/or an actual command result.
 
-| Criterion | Required evidence | Initial repository assessment |
+| Criterion | Required evidence | Current verified status |
 |---|---|---|
-| Market-data models and normalization | `market_data.py`, focused tests, and validated real fixture | `PASS`: implementation exists; fixture test is included and the current suite passes |
-| Exact numeric and validation semantics | Decimal/sub-cent/fractional quantity tests; malformed-value rejection | `PASS`: covered by `tests/test_market_data.py` |
+| Market-data models and normalization | `market_data.py`, focused tests, and validated real fixture | `PASS`: validated models, regression tests, and the refreshed fixture normalize successfully |
+| Exact numeric and validation semantics | Decimal/sub-cent/fractional quantity tests; malformed-value rejection | `PASS`: Decimal/sub-cent, fractional quantity, malformed-value, and timestamp regression tests pass |
 | Public GET-only REST client | `rest_client.py` and fake-transport tests showing GET-only behavior | `PASS`: covered by `tests/test_rest_client.py` |
-| Pagination correctness | Multi-page, empty-cursor, and repeated-cursor tests | `PASS`: covered offline |
-| HTTP/API error and timeout handling | HTTP, transport, JSON, envelope, identifier, and finite-timeout tests | `PASS`: covered offline |
-| Real fixture normalization | `tests/fixtures/kalshi_market_response.json` exists and its offline test passes | `PASS`: fixture exists and the current suite reports its test passing |
-| Fresh live smoke compatibility | A current smoke command returns HTTP success, normalizes a market, and reports fixture output | `NOT YET VERIFIED` in this repository-only inspection; do not infer it solely from fixture presence |
-| Reproducible verification commands | Commands and actual results recorded in memory/final report | `PASS` only after the current run records them |
-| Documentation accuracy | Guidelines and project docs match the actual implementation and scope | `NOT YET VERIFIED` until reviewed against the final diff |
-| Architectural modularity and scope control | Final diff review confirms no V2/trading functionality or boundary violations | `NOT YET VERIFIED` until the final diff review |
+| Pagination correctness | Multi-page, empty-cursor, and repeated-cursor tests | `PASS`: covered by offline fake-transport tests |
+| HTTP/API error and timeout handling | HTTP, transport, JSON, envelope, identifier, and finite-timeout tests | `PASS`: covered by offline fake-transport tests |
+| Real fixture normalization | `tests/fixtures/kalshi_market_response.json` exists and its offline test passes | `PASS`: refreshed live fixture normalizes offline |
+| Fresh live smoke compatibility | A current smoke command returns HTTP success, normalizes a market, and reports fixture output | `PASS`: the smoke script returned HTTP 200, normalized a current market, and refreshed the fixture |
+| Reproducible verification commands | Commands and actual results recorded in memory/final report | `PASS`: commands and results are recorded in `V1_LOOP_MEMORY.md` |
+| Documentation accuracy | Guidelines and project docs match the actual implementation and scope | `PASS`: architecture documentation now distinguishes implemented V0/V1 components from deferred work |
+| Architectural modularity and scope control | Final diff review confirms no V2/trading functionality or boundary violations | `PASS`: reviewed V1 diff is limited to validation, tests, fixture, and documentation |
 
-If a requirement is ambiguous, record the ambiguity and request a decision. Do not guess or silently broaden the acceptance criteria. Update the initial assessment only with new evidence.
+If a requirement is ambiguous, record the ambiguity and request a decision. Do not guess or silently broaden the acceptance criteria. Update the verified status only with new evidence.
 
 ## G. Normal completion and stop conditions
 

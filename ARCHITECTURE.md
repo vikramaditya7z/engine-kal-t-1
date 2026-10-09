@@ -4,7 +4,7 @@
 
 The long-term system is a deterministic quantitative research and paper-trading engine for Kalshi prediction markets. It will ingest market observations, represent contracts and settlement payoffs, detect only logically established arbitrage relationships, evaluate executable profitability after costs and liquidity constraints, simulate fills, maintain a paper-trading ledger, and support historical replay and backtesting. No real-money execution is in scope for the initial versions.
 
-This document describes the intended direction. **Today, this repository contains only this architecture document and `PROJECT_RULES.md`; no application component or roadmap milestone has been implemented.**
+This document describes both the intended direction and the currently implemented V0/V1 boundary. V0 and the current V1 market-data foundation are implemented; later roadmap capabilities remain planned.
 
 ## Roadmap
 
@@ -25,6 +25,12 @@ The versions extend one codebase. Each version should deliver only the capabilit
 
 The strategy layer consumes stable, normalized domain objects—not raw REST or WebSocket response objects. Adapters may change as API details are learned, while domain and strategy logic remain insulated from transport-specific schemas.
 
+Today, the implemented flow ends at normalized data:
+
+`public REST response → transport/error handling → validation and normalization → normalized market or event model`
+
+The V0 contract and portfolio payoff models remain separate. V1 does not infer a mapping from a normalized market to a V0 contract outcome, and it does not perform strategy detection or execution.
+
 ## Eventual component responsibilities and boundaries
 
 - **Data ingestion:** Obtain REST snapshots and, when appropriate, WebSocket events; validate transport payloads, timestamps, and provenance. It does not decide whether a trade exists.
@@ -41,7 +47,9 @@ Strategy detection, execution simulation, and accounting are separate responsibi
 
 ## Technology direction
 
-Use Python as the primary implementation language, `pytest` for tests, and Kalshi REST/WebSocket APIs when the relevant milestone requires them. Use a suitable local storage format for recorded market data and replay inputs; select the format and other dependencies only when needed for the active milestone. API details, authentication, rate limits, and fee rules must be verified from authoritative current documentation before implementation; this architecture does not claim that they have been verified.
+Python is the implementation language and `pytest` is used for offline tests. The current V1 REST client uses the Python standard library and exposes read-only GET access to production or demo Kalshi REST endpoints for market listing, a single market, and a single event. It has finite timeouts, explicit HTTP/transport/JSON/envelope errors, and cursor-loop protection. It has no authentication, retry policy, WebSocket support, or order placement.
+
+Normalized API prices and quantities use `Decimal` without float parsing or silent rounding. V0 settlement payouts remain integer cents. A recorded real market response supports deterministic offline normalization tests; the smoke script makes one public market request and refreshes that fixture only after successful normalization. Storage for historical replay remains a later decision.
 
 ## Key correctness risks
 
@@ -56,5 +64,14 @@ Use Python as the primary implementation language, `pytest` for tests, and Kalsh
 
 ## Present versus planned
 
-The architecture above is a target boundary map, not a claim that these components exist. The current repository intentionally contains only project guidance. Implementation begins at V0 and should add the smallest tested slice required by that milestone; API connectivity, live data, execution simulation, ledgering, replay, and advanced research remain planned until their roadmap versions are reached.
+### Implemented today
+
+- **V0 contract/payoff model:** `contract.py` models deterministic binary settlement and gross P/L using integer cents. `portfolio.py` evaluates finite-outcome event portfolios only when the mutually exclusive and collectively exhaustive relationship is explicitly declared.
+- **V1 normalized market-data model:** `market_data.py` validates binary market and event metadata, timestamps, exact `Decimal` prices and quantities, and order-book levels without allowing raw API dictionaries into future strategy code. Unknown lifecycle statuses are preserved as raw status strings rather than treated as open. Event `mutually_exclusive` metadata is preserved, but collective exhaustiveness and cross-market settlement relationships are never inferred.
+- **V1 public REST boundary:** `rest_client.py` supplies a small GET-only client for listing markets with explicit cursor pagination and for fetching one market or event. Each payload is validated and normalized before it is returned. Malformed data is surfaced as an error rather than silently discarded.
+- **V1 verification assets:** pytest coverage includes V0 settlement behavior, market-data validation, REST fake-transport behavior, and a captured public market fixture. `scripts/smoke_test_markets.py` performs the bounded live public market smoke test.
+
+### Still planned
+
+WebSockets, live order-book retrieval, authentication, order placement, arbitrage detection, execution-cost pricing, risk controls, paper execution, ledgering, historical replay, and advanced research are not implemented. Implementation should continue to add only the smallest tested capability required by the active roadmap milestone.
 

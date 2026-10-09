@@ -74,6 +74,33 @@ def test_exact_numeric_parsing_preserves_subcent_and_fractional_values():
     assert market.updated_time is None
 
 
+def test_timestamp_parser_accepts_observed_five_digit_fractional_seconds():
+    payload = market_payload()
+    payload["market"]["updated_time"] = "2026-10-09T10:28:39.57017+00:00"
+
+    market = normalize_market(payload)
+
+    assert market.updated_time == datetime(
+        2026, 10, 9, 10, 28, 39, 570170, tzinfo=timezone.utc
+    )
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-10-09T10:28:39.57017",
+        "2026-10-09T10:28:39.1234567+00:00",
+        "not-a-timestamp",
+    ],
+)
+def test_timestamp_parser_rejects_naive_overprecision_and_malformed_values(timestamp):
+    payload = market_payload()
+    payload["market"]["updated_time"] = timestamp
+
+    with pytest.raises(MarketDataInputError, match="updated_time"):
+        normalize_market(payload)
+
+
 def test_valid_event_preserves_mutual_exclusion_without_claiming_exhaustiveness():
     event = normalize_event(event_payload())
     assert event.event_ticker == "KXTEST-EVENT"

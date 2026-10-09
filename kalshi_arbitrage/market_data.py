@@ -106,13 +106,15 @@ def _optional_timestamp(value: object, name: str) -> Optional[datetime]:
         return None
     if not isinstance(value, str) or not value:
         raise MarketDataInputError(f"{name} must be an ISO-8601 timestamp or null")
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise MarketDataInputError(f"{name} must be an ISO-8601 timestamp or null") from exc
-    if parsed.tzinfo is None:
-        raise MarketDataInputError(f"{name} must include a timezone")
-    return parsed
+    for format_string in (
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S%z",
+    ):
+        try:
+            return datetime.strptime(value, format_string)
+        except ValueError:
+            continue
+    raise MarketDataInputError(f"{name} must be an ISO-8601 timestamp with a timezone or null")
 
 
 def _optional_bool(value: object, name: str) -> Optional[bool]:
