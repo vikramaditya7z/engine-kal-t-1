@@ -608,3 +608,436 @@ def test_cli_execution_with_json_export(tmp_path: Path):
         data = json.load(f)
         assert data["metrics"]["qualified_opportunities"] == 1
         assert data["metrics"]["paper_trades_filled"] == 1
+
+
+# ===========================================================================
+# 16. Regression Tests for Audit Findings F-01 through F-09
+# ===========================================================================
+
+def test_unconfigured_fee_fails_closed_when_enforcing_net_profitability():
+    """F-01: When fees are unconfigured (None), enforce_net_profitability must fail closed."""
+    obs = make_test_observation(ticker="KX-F01", yes_ask="0.40", no_ask="0.55")
+    dataset = HistoricalDataset.from_observations([obs])
+
+    # 1a. Enforcing net profitability without fee configuration must reject
+    cfg_strict = EvaluationConfig(
+        default_fee_per_contract_cents=None,
+        enforce_net_profitability=True,
+    )
+    report_strict = HistoricalEvaluator(cfg_strict).evaluate(dataset)
+    assert report_strict.metrics.candidates_detected == 1
+    assert report_strict.metrics.qualified_opportunities == 0
+    assert report_strict.metrics.rejected_opportunities == 1
+
+    rec_strict = report_strict.evaluated_records[0]
+    assert rec_strict.is_qualified is False
+    assert rec_strict.status == STATUS_REJECTED_UNPROFITABLE_FEES
+    assert rec_strict.configured_fee_cents is None
+    assert rec_strict.net_edge_cents is None
+    assert "Net profitability cannot be verified without fee configuration" in rec_strict.rejection_reason
+
+    # 1b. Disabling enforcement qualifies the candidate while recording fee as None
+    cfg_permissive = EvaluationConfig(
+        default_fee_per_contract_cents=None,
+        enforce_net_profitability=False,
+    )
+    report_perm = HistoricalEvaluator(cfg_permissive).evaluate(dataset)
+    assert report_perm.metrics.qualified_opportunities == 1
+    rec_perm = report_perm.evaluated_records[0]
+    assert rec_perm.is_qualified is True
+    assert rec_perm.configured_fee_cents is None
+    assert rec_perm.net_edge_cents is None
+
+
+def test_mece_basket_rejects_stale_and_future_legs():
+    """F-02: MECE basket legs must fail closed when stale or future-drifted."""
+    now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+
+    # 2a. Both legs 2 hours old (skew only 1s) -> must reject as STALE
+    t_stale1 = now - timedelta(hours=2)
+    t_stale2 = now - timedelta(hours=2) + timedelta(seconds=1)
+    obs_a = make_test_observation("KX-MA", yes_ask="0.40", no_ask="0.60", observed_at=now, source_timestamp=t_stale1)
+    obs_b = make_test_observation("KX-MB", yes_ask="0.40", no_ask="0.60", observed_at=now, source_timestamp=t_stale2)
+    basket = DeclaredMeceBasket(
+        event_ticker="EV-STALE",
+        outcomes=("A", "B"),
+        market_outcome_map={"KX-MA": "A", "KX-MB": "B"},
+        basket_side=YES,
+    )
+    ds_stale = HistoricalDataset.from_observations([obs_a, obs_b])
+    rep_stale = HistoricalEvaluator(EvaluationConfig(declared_baskets=(basket,), max_stale_seconds=60.0)).evaluate(ds_stale)
+    basket_recs = [r for r in rep_stale.evaluated_records if "MECE" in r.opportunity_id]
+    assert len(basket_recs) == 1
+    assert basket_recs[0].is_qualified is False
+    assert basket_recs[0].status == STATUS_REJECTED_STALE
+    assert "stale" in basket_recs[0].rejection_reason.lower()
+
+    # 2b. One leg marked is_stale=True -> must reject
+    obs_stale_flag = make_test_observation("KX-MA", observed_at=now, source_timestamp=now, is_stale=True)
+    obs_fresh = make_test_observation("KX-MB", observed_at=now, source_timestamp=now)
+    ds_flag = HistoricalDataset.from_observations([obs_stale_flag, obs_fresh])
+    rep_flag = HistoricalEvaluator(EvaluationConfig(declared_baskets=(basket,))).evaluate(ds_flag)
+    basket_recs_flag = [r for r in rep_flag.evaluated_records if "MECE" in r.opportunity_id]
+    assert len(basket_recs_flag) == 1
+    assert basket_recs_flag[0].is_qualified is False
+    assert basket_recs_flag[0].status == STATUS_REJECTED_STALE
+
+    # 2c. One leg future drifted (> 10s into future) -> must reject
+    obs_future = make_test_observation("KX-MA", observed_at=now, source_timestamp=now + timedelta(seconds=25))
+    ds_fut = HistoricalDataset.from_observations([obs_future, obs_fresh])
+    rep_fut = HistoricalEvaluator(EvaluationConfig(declared_baskets=(basket,), max_future_seconds=10.0)).evaluate(ds_fut)
+    basket_recs_fut = [r for r in rep_fut.evaluated_records if "MECE" in r.opportunity_id]
+    assert len(basket_recs_fut) == 1
+    assert basket_recs_fut[0].is_qualified is False
+    assert basket_recs_fut[0].status == STATUS_REJECTED_STALE
+    assert "future" in basket_recs_fut[0].rejection_reason.lower()
+
+
+def test_mece_basket_timezone_normalized_skew():
+    """F-06: Distinct timezone offsets normalize consistently to UTC for skew calculation."""
+    now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    t1_utc = now
+    # t2 in UTC-4 (08:00:02 EDT is 12:00:02 UTC -> 2s skew)
+    tz_minus4 = timezone(timedelta(hours=-4))
+    t2_offset = datetime(2026, 10, 9, 8, 0, 2, tzinfo=tz_minus4)
+
+    obs_a = make_test_observation("KX-TZA", yes_ask="0.40", no_ask="0.60", observed_at=now, source_timestamp=t1_utc)
+    obs_b = make_test_observation("KX-TZB", yes_ask="0.40", no_ask="0.60", observed_at=now, source_timestamp=t2_offset)
+    basket = DeclaredMeceBasket(
+        event_ticker="EV-TZ",
+        outcomes=("A", "B"),
+        market_outcome_map={"KX-TZA": "A", "KX-TZB": "B"},
+        basket_side=YES,
+    )
+    dataset = HistoricalDataset.from_observations([obs_a, obs_b])
+    report = HistoricalEvaluator(EvaluationConfig(declared_baskets=(basket,), max_leg_timestamp_skew_seconds=5.0)).evaluate(dataset)
+    basket_recs = [r for r in report.evaluated_records if "MECE" in r.opportunity_id]
+    assert len(basket_recs) == 1
+    assert abs(basket_recs[0].leg_timestamp_skew_seconds - 2.0) < 1e-6
+    assert basket_recs[0].is_qualified is True
+
+
+def test_opportunity_episode_lifecycle_reappearance():
+    """F-03: Opportunity recurrence ends on disappearance, allowing new episodes to trade."""
+    now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    # Obs 1: Arb opportunity (40¢ + 55¢ = 95¢)
+    obs1 = make_test_observation("KX-LIFE", yes_ask="0.40", no_ask="0.55", observed_at=now)
+    # Obs 2: Lingering arb 5s later
+    obs2 = make_test_observation("KX-LIFE", yes_ask="0.40", no_ask="0.55", observed_at=now + timedelta(seconds=5))
+    # Obs 3: Arb disappeared (60¢ + 60¢ = 120¢) 10s later
+    obs3 = make_test_observation("KX-LIFE", yes_ask="0.60", no_ask="0.60", observed_at=now + timedelta(seconds=10))
+    # Obs 4: New arb opportunity reappears 60s later
+    obs4 = make_test_observation("KX-LIFE", yes_ask="0.40", no_ask="0.55", observed_at=now + timedelta(seconds=60))
+
+    dataset = HistoricalDataset.from_observations([obs1, obs2, obs3, obs4], deduplicate=False)
+    config = EvaluationConfig(enable_paper_trading=True, default_fee_per_contract_cents=1)
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    # 3 evaluated arb records: obs1 (initial), obs2 (recurrent), obs4 (reappeared new episode)
+    assert len(report.evaluated_records) == 3
+    assert report.evaluated_records[0].is_recurrent is False
+    assert report.evaluated_records[1].is_recurrent is True
+    assert report.evaluated_records[2].is_recurrent is False  # Reappeared episode!
+
+    # Exactly 2 paper trades executed (obs1 and obs4)
+    assert len(report.paper_trades) == 2
+    assert report.paper_trades[0].state == TradeState.FILLED
+    assert report.paper_trades[1].state == TradeState.FILLED
+
+
+def test_stale_initial_observation_does_not_block_subsequent_fresh_trade():
+    """F-03: A stale or rejected observation must not suppress subsequent fresh trades."""
+    now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    # Obs 1: Stale timestamp (2 hours old)
+    obs_stale = make_test_observation(
+        "KX-STALEFIRST",
+        yes_ask="0.40",
+        no_ask="0.55",
+        observed_at=now,
+        source_timestamp=now - timedelta(hours=2),
+    )
+    # Obs 2: Fresh timestamp 10s later
+    obs_fresh = make_test_observation(
+        "KX-STALEFIRST",
+        yes_ask="0.40",
+        no_ask="0.55",
+        observed_at=now + timedelta(seconds=10),
+        source_timestamp=now + timedelta(seconds=10),
+    )
+
+    dataset = HistoricalDataset.from_observations([obs_stale, obs_fresh], deduplicate=False)
+    config = EvaluationConfig(enable_paper_trading=True, default_fee_per_contract_cents=1)
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    assert len(report.evaluated_records) == 2
+    assert report.evaluated_records[0].status == STATUS_REJECTED_STALE
+    assert report.evaluated_records[0].is_recurrent is False
+
+    assert report.evaluated_records[1].status == STATUS_QUALIFIED
+    assert report.evaluated_records[1].is_recurrent is False  # Must not be suppressed!
+
+    # Fresh trade was executed
+    assert len(report.paper_trades) == 1
+    assert report.paper_trades[0].state == TradeState.FILLED
+
+
+def test_opportunity_episode_timeout():
+    """F-03: Inactivity beyond episode_timeout_seconds resets recurrence."""
+    now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    obs1 = make_test_observation("KX-TIMEOUT", yes_ask="0.40", no_ask="0.55", observed_at=now)
+    # 300s later (> 120s timeout)
+    obs2 = make_test_observation("KX-TIMEOUT", yes_ask="0.40", no_ask="0.55", observed_at=now + timedelta(seconds=300))
+
+    dataset = HistoricalDataset.from_observations([obs1, obs2], deduplicate=False)
+    config = EvaluationConfig(enable_paper_trading=True, episode_timeout_seconds=120.0)
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    assert len(report.evaluated_records) == 2
+    assert report.evaluated_records[0].is_recurrent is False
+    assert report.evaluated_records[1].is_recurrent is False  # Timed out -> new episode!
+    assert len(report.paper_trades) == 2
+
+
+def test_mece_basket_paper_trading_execution():
+    """F-04: Declared MECE basket simulates paper trading fills and ledger updates."""
+    now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    obs_a = make_test_observation("KX-MECEA", yes_ask="0.30", no_ask="0.70", observed_at=now)
+    obs_b = make_test_observation("KX-MECEB", yes_ask="0.60", no_ask="0.40", observed_at=now)
+    basket = DeclaredMeceBasket(
+        event_ticker="EV-PAPER",
+        outcomes=("OUT_A", "OUT_B"),
+        market_outcome_map={"KX-MECEA": "OUT_A", "KX-MECEB": "OUT_B"},
+        basket_side=YES,
+    )
+    dataset = HistoricalDataset.from_observations([obs_a, obs_b])
+    config = EvaluationConfig(
+        target_quantity=5,
+        default_fee_per_contract_cents=1,
+        declared_baskets=(basket,),
+        enable_paper_trading=True,
+    )
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    # MECE basket record qualified
+    basket_recs = [r for r in report.evaluated_records if "MECE" in r.opportunity_id]
+    assert len(basket_recs) == 1
+    rec = basket_recs[0]
+    assert rec.is_qualified is True
+    assert rec.paper_trade_id is not None
+
+    # Paper trade executed for MECE basket
+    assert len(report.paper_trades) == 1
+    trade = report.paper_trades[0]
+    assert trade.trade_id == rec.paper_trade_id
+    assert trade.state == TradeState.FILLED
+    assert trade.filled_quantity == 5
+    # 5 contracts * (30¢ + 60¢ = 90¢) = 450¢ cost
+    assert trade.total_cost_cents == 450
+    # 5 contracts * 2 legs * 1¢ fee = 10¢ fee
+    assert trade.estimated_fees_cents == 10
+
+    # Ledger consistency
+    portfolio = report.paper_portfolio
+    assert portfolio is not None
+    assert portfolio.reconcile().is_reconciled is True
+    assert portfolio.total_fees_paid_cents == 10
+    assert portfolio.available_cash_cents == 100_000 - 450 - 10
+    assert portfolio.positions[("KX-MECEA", YES)].quantity == 5
+    assert portfolio.positions[("KX-MECEB", YES)].quantity == 5
+
+
+def test_out_of_order_monotonic_high_water_count():
+    """F-05: Ingestion counts out-of-order records against monotonic high-water mark."""
+    base = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    # Timestamps: [10s, 5s, 6s, 7s, 8s, 9s, 10s]
+    # Against monotonic high water 10s: indices 1, 2, 3, 4, 5 are all < 10s -> 5 out of order!
+    offsets = [10, 5, 6, 7, 8, 9, 10]
+    obs_list = [
+        make_test_observation(f"KX-{i}", observed_at=base + timedelta(seconds=off))
+        for i, off in enumerate(offsets)
+    ]
+    dataset = HistoricalDataset.from_observations(obs_list, deduplicate=False)
+    assert dataset.out_of_order_records_count == 5
+    # Chronological sort order preserved
+    assert [int((o.observed_at - base).total_seconds()) for o in dataset.observations] == [
+        5, 6, 7, 8, 9, 10, 10
+    ]
+
+
+def test_sensitivity_analysis_inherits_base_config_fee():
+    """F-08: Sensitivity profiles inherit base config fee when not explicitly overridden."""
+    obs = make_test_observation("KX-SENSFEE", yes_ask="0.40", no_ask="0.55")
+    dataset = HistoricalDataset.from_observations([obs])
+
+    base_config = EvaluationConfig(default_fee_per_contract_cents=3)
+    sens_report = run_sensitivity_analysis(dataset, base_config=base_config)
+
+    # Tight freshness profile should inherit the 3¢ fee from base_config
+    tight_row = next(r for r in sens_report.rows if "Tight Freshness" in r.name)
+    assert tight_row.fee_per_contract_cents == 3
+
+    # Zero fees profile should still explicitly evaluate 0¢ fee
+    zero_row = next(r for r in sens_report.rows if "Zero Fees" in r.name)
+    assert zero_row.fee_per_contract_cents == 0
+
+
+def test_haircut_separate_from_exchange_fees():
+    """F-09: Modeled slippage haircut adjusts net edge without distorting ledger exchange fees."""
+    obs = make_test_observation("KX-HAIRCUT", yes_ask="0.40", no_ask="0.50")  # gross edge 10¢
+    dataset = HistoricalDataset.from_observations([obs])
+    config = EvaluationConfig(
+        target_quantity=5,
+        default_fee_per_contract_cents=1,
+        conservative_haircut_cents=2,
+        enable_paper_trading=True,
+    )
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    record = report.evaluated_records[0]
+    assert record.is_qualified is True
+    # Gross edge: 5 * 10¢ = 50¢
+    assert record.theoretical_gross_edge_cents == 50
+    # Modeled exchange fee: 5 * 2 legs * 1¢ = 10¢
+    assert record.configured_fee_cents == 1
+    # Modeled haircut: 5 * 2 legs * 2¢ = 20¢
+    assert record.conservative_haircut_cents == 2
+    # Net edge after fee AND haircut: 50¢ - 10¢ - 20¢ = 20¢
+    assert record.net_edge_cents == 20
+
+    # Trade ledger must ONLY record exchange fees (10¢), not the haircut buffer!
+    assert len(report.paper_trades) == 1
+    trade = report.paper_trades[0]
+    assert trade.estimated_fees_cents == 10
+    portfolio = report.paper_portfolio
+    assert portfolio is not None
+    assert portfolio.total_fees_paid_cents == 10
+    assert portfolio.reconcile().is_reconciled is True
+
+
+def test_stale_observation_does_not_evict_active_episode():
+    """Untrusted/stale observations must not evict an active episode or cause duplicate trades."""
+    t0 = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    # 1. Fresh arb opportunity arrives -> trades
+    obs1 = make_test_observation("KX-ACTIVE", yes_ask="0.40", no_ask="0.55", observed_at=t0, source_timestamp=t0)
+    # 2. Stale observation arrives with non-arb prices (must not evict active episode)
+    t1 = t0 + timedelta(seconds=5)
+    obs_stale = make_test_observation(
+        "KX-ACTIVE",
+        yes_ask="0.60",
+        no_ask="0.60",
+        observed_at=t1,
+        source_timestamp=t0 - timedelta(hours=1),
+    )
+    # 3. Fresh observation arrives with continuing arb prices (must remain recurrent)
+    t2 = t0 + timedelta(seconds=10)
+    obs_fresh = make_test_observation("KX-ACTIVE", yes_ask="0.40", no_ask="0.55", observed_at=t2, source_timestamp=t2)
+
+    dataset = HistoricalDataset.from_observations([obs1, obs_stale, obs_fresh], deduplicate=False)
+    config = EvaluationConfig(enable_paper_trading=True, default_fee_per_contract_cents=1)
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    # obs1 is evaluated and qualified; obs_fresh is evaluated and marked recurrent
+    recs = report.evaluated_records
+    assert len(recs) == 2
+    assert recs[0].is_recurrent is False
+    assert recs[0].is_qualified is True
+    assert recs[1].is_recurrent is True
+    assert recs[1].is_qualified is True
+
+    # Exactly 1 paper trade executed (duplicate suppressed!)
+    assert len(report.paper_trades) == 1
+    assert report.paper_trades[0].state == TradeState.FILLED
+
+
+def test_mece_interleaved_leg_updates_do_not_evict_active_episode():
+    """Interleaved leg ticks in an MECE basket must not evict an active episode."""
+    t0 = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    # Cycle 1: Leg A and Leg B establish arb -> paper trade executes
+    obs_a0 = make_test_observation("KX-LEGA", yes_ask="0.40", no_ask="0.60", observed_at=t0, source_timestamp=t0)
+    obs_b0 = make_test_observation("KX-LEGB", yes_ask="0.55", no_ask="0.45", observed_at=t0, source_timestamp=t0)
+
+    # Cycle 2: Leg A updates first to 0.50 (momentarily A=0.50 + B_old=0.55 = 1.05, no gross edge)
+    t1 = t0 + timedelta(seconds=10)
+    obs_a1 = make_test_observation("KX-LEGA", yes_ask="0.50", no_ask="0.50", observed_at=t1, source_timestamp=t1)
+
+    # Cycle 2: Leg B updates 10ms later to 0.40 (A=0.50 + B=0.40 = 0.90, arb continues!)
+    t1_b = t1 + timedelta(milliseconds=10)
+    obs_b1 = make_test_observation("KX-LEGB", yes_ask="0.40", no_ask="0.60", observed_at=t1_b, source_timestamp=t1_b)
+
+    basket = DeclaredMeceBasket(
+        event_ticker="EV-INTERLEAVE",
+        outcomes=("A", "B"),
+        market_outcome_map={"KX-LEGA": "A", "KX-LEGB": "B"},
+        basket_side=YES,
+    )
+    dataset = HistoricalDataset.from_observations([obs_a0, obs_b0, obs_a1, obs_b1], deduplicate=False)
+    config = EvaluationConfig(
+        declared_baskets=(basket,),
+        enable_paper_trading=True,
+        default_fee_per_contract_cents=1,
+    )
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    basket_recs = [r for r in report.evaluated_records if "MECE" in r.opportunity_id]
+    assert len(basket_recs) == 2
+    assert basket_recs[0].is_qualified is True
+    assert basket_recs[0].is_recurrent is False
+    assert basket_recs[0].paper_trade_id is not None
+
+    assert basket_recs[1].is_qualified is True
+    assert basket_recs[1].is_recurrent is True  # Intermediate tick did NOT evict episode!
+
+    # Exactly 1 paper trade executed (duplicate suppressed!)
+    assert len(report.paper_trades) == 1
+    assert report.paper_trades[0].state == TradeState.FILLED
+
+
+def test_mece_basket_partial_fill_paper_trading():
+    """Unequal leg depth results in common filled quantity, partial trade state, and consistent ledger."""
+    now = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    # Leg A has 10 contracts of depth at 30¢
+    obs_a = make_test_observation("KX-PARTA", yes_ask="0.30", no_ask="0.70", yes_qty="10.00", observed_at=now)
+    # Leg B has only 3 contracts of depth at 60¢ (bottleneck)
+    obs_b = make_test_observation("KX-PARTB", yes_ask="0.60", no_ask="0.40", yes_qty="3.00", observed_at=now)
+
+    basket = DeclaredMeceBasket(
+        event_ticker="EV-PARTIAL",
+        outcomes=("OUT_A", "OUT_B"),
+        market_outcome_map={"KX-PARTA": "OUT_A", "KX-PARTB": "OUT_B"},
+        basket_side=YES,
+    )
+    dataset = HistoricalDataset.from_observations([obs_a, obs_b])
+    config = EvaluationConfig(
+        target_quantity=10,
+        default_fee_per_contract_cents=1,
+        declared_baskets=(basket,),
+        enable_paper_trading=True,
+    )
+    report = HistoricalEvaluator(config).evaluate(dataset)
+
+    basket_recs = [r for r in report.evaluated_records if "MECE" in r.opportunity_id]
+    assert len(basket_recs) == 1
+    rec = basket_recs[0]
+    assert rec.is_qualified is True
+    assert rec.supported_quantity == 3  # Bottleneck depth
+    assert rec.paper_trade_id is not None
+
+    # Paper trade executed as partial fill
+    assert len(report.paper_trades) == 1
+    trade = report.paper_trades[0]
+    assert trade.trade_id == rec.paper_trade_id
+    assert trade.state == TradeState.PARTIALLY_FILLED
+    assert trade.filled_quantity == 3
+    # 3 contracts * (30¢ + 60¢ = 90¢) = 270¢ cost
+    assert trade.total_cost_cents == 270
+    # 3 contracts * 2 legs * 1¢ fee = 6¢ fee
+    assert trade.estimated_fees_cents == 6
+
+    # Ledger consistency
+    portfolio = report.paper_portfolio
+    assert portfolio is not None
+    assert portfolio.reconcile().is_reconciled is True
+    assert portfolio.total_fees_paid_cents == 6
+    assert portfolio.available_cash_cents == 100_000 - 270 - 6
+    assert portfolio.positions[("KX-PARTA", YES)].quantity == 3
+    assert portfolio.positions[("KX-PARTB", YES)].quantity == 3

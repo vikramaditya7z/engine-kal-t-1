@@ -70,6 +70,18 @@ class EvaluationError(Exception):
     """Base exception for evaluation configuration and runtime errors."""
 
 
+_INHERIT: Any = object()
+
+
+def _normalize_timestamp(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalize datetime to UTC for timezone-safe comparisons."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 # ---------------------------------------------------------------------------
 # Evaluation Configuration
 # ---------------------------------------------------------------------------
@@ -92,6 +104,7 @@ class EvaluationConfig:
     enforce_net_profitability: bool = True
     enable_paper_trading: bool = False  # Disabled by default
     conservative_haircut_cents: int = 0  # Modeled slippage buffer per contract
+    episode_timeout_seconds: float = 120.0  # Max inactivity before starting new opportunity episode
     risk_config: Optional[RiskConfig] = None
     declared_baskets: Tuple[DeclaredMeceBasket, ...] = ()
     deduplicate_observations: bool = True
@@ -115,6 +128,8 @@ class EvaluationConfig:
             raise EvaluationError("max_leg_timestamp_skew_seconds must be positive")
         if self.conservative_haircut_cents < 0:
             raise EvaluationError("conservative_haircut_cents must be non-negative")
+        if self.episode_timeout_seconds <= 0:
+            raise EvaluationError("episode_timeout_seconds must be positive")
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +177,7 @@ class HistoricalDataset:
         dup_count = 0
         out_of_order_count = 0
 
-        last_ts: Optional[datetime] = None
+        max_ts: Optional[datetime] = None
         for obs in observations:
             key = (obs.ticker, obs.observed_at.isoformat())
             if key in seen_keys:
@@ -171,13 +186,15 @@ class HistoricalDataset:
                     continue
             seen_keys.add(key)
 
-            if last_ts is not None and obs.observed_at < last_ts:
+            obs_ts_norm = _normalize_timestamp(obs.observed_at)
+            if max_ts is not None and obs_ts_norm < max_ts:
                 out_of_order_count += 1
-            last_ts = obs.observed_at
+            else:
+                max_ts = obs_ts_norm
             cleaned_obs.append(obs)
 
         # Sort chronologically to eliminate look-ahead bias and ensure determinism
-        sorted_obs = tuple(sorted(cleaned_obs, key=lambda o: o.observed_at))
+        sorted_obs = tuple(sorted(cleaned_obs, key=lambda o: _normalize_timestamp(o.observed_at)))
         earliest = sorted_obs[0].observed_at if sorted_obs else None
         latest = sorted_obs[-1].observed_at if sorted_obs else None
         tickers = tuple(sorted({o.ticker for o in sorted_obs}))
@@ -282,7 +299,7 @@ class OpportunityEvaluationRecord:
     supported_quantity: int
     entry_cost_cents: int
     expected_payout_cents: int
-    configured_fee_cents: int
+    configured_fee_cents: Optional[int]
     conservative_haircut_cents: int
     net_edge_cents: Optional[int]
     net_return_pct: Optional[Decimal]
@@ -516,10 +533,10 @@ class SensitivityProfile:
     """A specific parameter combination to evaluate in sensitivity analysis."""
 
     name: str
-    fee_per_contract_cents: Optional[int] = 1
-    max_stale_seconds: float = 60.0
-    conservative_haircut_cents: int = 0
-    target_quantity: int = 1
+    fee_per_contract_cents: Any = _INHERIT
+    max_stale_seconds: Any = _INHERIT
+    conservative_haircut_cents: Any = _INHERIT
+    target_quantity: Any = _INHERIT
 
 
 @dataclass(frozen=True)
@@ -604,10 +621,9 @@ class HistoricalEvaluator:
         if self.config.enable_paper_trading:
             portfolio = PaperPortfolio(initial_cash_cents=self.config.initial_cash_cents)
             risk_manager = RiskManager(self.config.risk_config or RiskConfig())
-            effective_fee = (
-                self.config.default_fee_per_contract_cents or 0
-            ) + self.config.conservative_haircut_cents
-            executor = PaperExecutionEngine(default_fee_per_contract_cents=effective_fee)
+            executor = PaperExecutionEngine(
+                default_fee_per_contract_cents=self.config.default_fee_per_contract_cents
+            )
 
         # Active opportunity episode tracking for recurrence & deduplication
         active_episodes: Dict[str, datetime] = {}
@@ -669,6 +685,29 @@ class HistoricalEvaluator:
                         active_episodes,
                     )
                     if basket_record is not None:
+                        if self.config.enable_paper_trading and executor and portfolio and risk_manager:
+                            if basket_record.is_qualified and not basket_record.is_recurrent:
+                                paper_trade = self._simulate_paper_trade_mece(
+                                    basket,
+                                    ticker_latest_obs,
+                                    basket_record,
+                                    executor,
+                                    portfolio,
+                                    risk_manager,
+                                )
+                                paper_trades.append(paper_trade)
+                                basket_record = dataclass_replace_paper_trade_id(
+                                    basket_record, paper_trade.trade_id
+                                )
+
+                                # Update drawdown
+                                curr_eq = portfolio.portfolio_equity_cents()
+                                if curr_eq > peak_equity_cents:
+                                    peak_equity_cents = curr_eq
+                                dd = peak_equity_cents - curr_eq
+                                if dd > max_drawdown_cents:
+                                    max_drawdown_cents = dd
+
                         records.append(basket_record)
 
         # Final ledger reconciliation
@@ -734,6 +773,8 @@ class HistoricalEvaluator:
         if not obs.is_success or obs.market is None or obs.order_book is None:
             return None
 
+        opp_id = make_binary_parity_opportunity_id(obs.ticker)
+
         # V2 Candidate Detection
         try:
             candidate = evaluate_market_parity(
@@ -744,34 +785,23 @@ class HistoricalEvaluator:
         except Exception:
             return None
 
-        # Filter: Must have gross edge or be theoretical arbitrage
-        if not candidate.is_arbitrage and candidate.gross_edge_cents <= 0:
-            return None
-
-        opp_id = make_binary_parity_opportunity_id(obs.ticker)
-        eval_id = f"eval-{generate_observation_id()}"
+        # Check freshness & future drift BEFORE assessing disappearance or qualification
         source_ts = obs.source_timestamp
         source_ts_map = {obs.ticker: source_ts}
-
-        # Check freshness & future drift
         is_fresh = True
         staleness_reason: Optional[str] = None
 
-        if source_ts is None:
+        if obs.is_stale:
+            is_fresh = False
+            staleness_reason = obs.staleness_reason or "Market observation marked as stale"
+        elif source_ts is None:
             if self.config.require_source_timestamp:
                 is_fresh = False
                 staleness_reason = "Missing exchange source timestamp"
         else:
-            # Ensure timezone compatibility
-            obs_tz = obs.observed_at.tzinfo
-            if source_ts.tzinfo is None and obs_tz is not None:
-                src_cmp = source_ts.replace(tzinfo=obs_tz)
-            elif source_ts.tzinfo is not None and obs_tz is None:
-                src_cmp = source_ts.astimezone(timezone.utc).replace(tzinfo=None)
-            else:
-                src_cmp = source_ts
-
-            age_seconds = (obs.observed_at - src_cmp).total_seconds()
+            norm_obs = _normalize_timestamp(obs.observed_at)
+            norm_src = _normalize_timestamp(source_ts)
+            age_seconds = (norm_obs - norm_src).total_seconds()
             if age_seconds < -self.config.max_future_seconds:
                 is_fresh = False
                 staleness_reason = f"Source timestamp is from the future ({age_seconds:.1f}s)"
@@ -781,12 +811,31 @@ class HistoricalEvaluator:
                     f"Order book is stale (age: {age_seconds:.1f}s > max: {self.config.max_stale_seconds:.1f}s)"
                 )
 
-        # Check recurrence
-        is_recurrent = opp_id in active_episodes
-        active_episodes[opp_id] = obs.observed_at
+        # Disappearance condition: ONLY a fresh, trustworthy observation can signal that an active episode ended.
+        if not candidate.is_arbitrage and candidate.gross_edge_cents <= 0:
+            if is_fresh and opp_id in active_episodes:
+                del active_episodes[opp_id]
+            return None
 
-        # If stale, reject fail-closed without pricing execution
+        eval_id = f"eval-{generate_observation_id()}"
+
+        # Check recurrence & episode tracking
+        last_seen = active_episodes.get(opp_id)
+        is_recurrent = False
+        if last_seen is not None:
+            norm_obs = _normalize_timestamp(obs.observed_at)
+            norm_last = _normalize_timestamp(last_seen)
+            gap_seconds = (norm_obs - norm_last).total_seconds()
+            if gap_seconds <= self.config.episode_timeout_seconds:
+                is_recurrent = True
+            else:
+                is_recurrent = False
+
+        # If stale, reject fail-closed without pricing execution.
+        # Do not activate episode if it was not already active (avoids blocking later fresh trades).
         if not is_fresh:
+            if is_recurrent:
+                active_episodes[opp_id] = obs.observed_at
             status = (
                 STATUS_REJECTED_MISSING_TIMESTAMP
                 if staleness_reason == "Missing exchange source timestamp"
@@ -806,7 +855,7 @@ class HistoricalEvaluator:
                 supported_quantity=0,
                 entry_cost_cents=0,
                 expected_payout_cents=0,
-                configured_fee_cents=self.config.default_fee_per_contract_cents or 0,
+                configured_fee_cents=self.config.default_fee_per_contract_cents,
                 conservative_haircut_cents=self.config.conservative_haircut_cents,
                 net_edge_cents=None,
                 net_return_pct=None,
@@ -816,20 +865,31 @@ class HistoricalEvaluator:
                 is_recurrent=is_recurrent,
             )
 
-        # V3 Execution Pricing
-        effective_fee = (
-            self.config.default_fee_per_contract_cents or 0
-        ) + self.config.conservative_haircut_cents
+        # Fresh observation updates active episode
+        active_episodes[opp_id] = obs.observed_at
 
+        # V3 Execution Pricing (passes exact configured fee, preserving None)
         pricing = evaluate_binary_parity_execution(
             obs.order_book,
             requested_quantity=self.config.target_quantity,
-            fee_per_contract_cents=effective_fee,
+            fee_per_contract_cents=self.config.default_fee_per_contract_cents,
         )
 
         is_qualified = False
         status = pricing.status
         rejection_reason = pricing.rejection_reason
+
+        # Haircut calculation kept separate from exchange fees
+        total_contracts = sum(t.supported_quantity for t in pricing.leg_traversals)
+        total_haircut_cents = total_contracts * self.config.conservative_haircut_cents
+        modeled_net_profit_cents: Optional[int] = None
+        modeled_is_net_profitable: Optional[bool] = None
+
+        if pricing.net_profit_cents is not None:
+            modeled_net_profit_cents = pricing.net_profit_cents - total_haircut_cents
+            modeled_is_net_profitable = modeled_net_profit_cents > 0
+        elif self.config.default_fee_per_contract_cents is None:
+            modeled_is_net_profitable = None
 
         if pricing.supported_quantity == 0:
             status = STATUS_REJECTED_INSUFFICIENT_DEPTH
@@ -837,10 +897,10 @@ class HistoricalEvaluator:
         elif not pricing.is_gross_profitable:
             status = STATUS_REJECTED_NO_GROSS_EDGE
             rejection_reason = "No gross edge when traversing order book depth"
-        elif self.config.enforce_net_profitability and pricing.is_net_profitable is False:
+        elif self.config.enforce_net_profitability and modeled_is_net_profitable is False:
             status = STATUS_REJECTED_UNPROFITABLE_FEES
             rejection_reason = "Unprofitable after estimated fees and haircut"
-        elif self.config.enforce_net_profitability and pricing.is_net_profitable is None:
+        elif self.config.enforce_net_profitability and modeled_is_net_profitable is None:
             status = STATUS_REJECTED_UNPROFITABLE_FEES
             rejection_reason = "Net profitability cannot be verified without fee configuration"
         else:
@@ -849,9 +909,9 @@ class HistoricalEvaluator:
             rejection_reason = None
 
         net_return_pct = None
-        if pricing.net_profit_cents is not None and pricing.total_cost_cents > 0:
+        if modeled_net_profit_cents is not None and pricing.total_cost_cents > 0:
             net_return_pct = (
-                Decimal(pricing.net_profit_cents) / Decimal(pricing.total_cost_cents)
+                Decimal(modeled_net_profit_cents) / Decimal(pricing.total_cost_cents)
             ) * Decimal(100)
 
         return OpportunityEvaluationRecord(
@@ -868,9 +928,9 @@ class HistoricalEvaluator:
             supported_quantity=pricing.supported_quantity,
             entry_cost_cents=pricing.total_cost_cents,
             expected_payout_cents=pricing.guaranteed_payout_cents,
-            configured_fee_cents=self.config.default_fee_per_contract_cents or 0,
+            configured_fee_cents=self.config.default_fee_per_contract_cents,
             conservative_haircut_cents=self.config.conservative_haircut_cents,
-            net_edge_cents=pricing.net_profit_cents,
+            net_edge_cents=modeled_net_profit_cents,
             net_return_pct=net_return_pct,
             is_qualified=is_qualified,
             status=status,
@@ -927,46 +987,86 @@ class HistoricalEvaluator:
         except Exception:
             return None
 
+        # Check freshness & future drift across EVERY leg
+        is_fresh = True
+        staleness_reason: Optional[str] = None
+        rejection_status = STATUS_REJECTED_STALE
+        norm_observed_at = _normalize_timestamp(observed_at)
+
+        for o in basket_obs:
+            if o.is_stale:
+                is_fresh = False
+                staleness_reason = o.staleness_reason or f"Leg {o.ticker} is marked as stale"
+                rejection_status = STATUS_REJECTED_STALE
+                break
+            elif o.source_timestamp is None:
+                if self.config.require_source_timestamp:
+                    is_fresh = False
+                    staleness_reason = f"Missing source timestamp for leg {o.ticker}"
+                    rejection_status = STATUS_REJECTED_MISSING_TIMESTAMP
+                    break
+            else:
+                norm_leg_ts = _normalize_timestamp(o.source_timestamp)
+                age_seconds = (norm_observed_at - norm_leg_ts).total_seconds()
+                if age_seconds < -self.config.max_future_seconds:
+                    is_fresh = False
+                    staleness_reason = f"Source timestamp for leg {o.ticker} is from the future ({age_seconds:.1f}s)"
+                    rejection_status = STATUS_REJECTED_STALE
+                    break
+                elif age_seconds > self.config.max_stale_seconds:
+                    is_fresh = False
+                    staleness_reason = (
+                        f"Order book for leg {o.ticker} is stale "
+                        f"(age: {age_seconds:.1f}s > max: {self.config.max_stale_seconds:.1f}s)"
+                    )
+                    rejection_status = STATUS_REJECTED_STALE
+                    break
+
+        # Check multi-leg skew with normalized timestamps
+        times: List[float] = [
+            _normalize_timestamp(o.source_timestamp).timestamp()
+            for o in basket_obs
+            if o.source_timestamp is not None
+        ]
+        skew_seconds = max(times) - min(times) if len(times) > 1 else 0.0
+        if is_fresh and skew_seconds > self.config.max_leg_timestamp_skew_seconds:
+            is_fresh = False
+            staleness_reason = (
+                f"Leg timestamp skew {skew_seconds:.2f}s > max {self.config.max_leg_timestamp_skew_seconds:.2f}s"
+            )
+            rejection_status = STATUS_REJECTED_LEG_SKEW
+
+        # Check recurrence & episode tracking
+        last_seen = active_episodes.get(opp_id)
+        is_recurrent = False
+        is_intermediate_update = False
+        if last_seen is not None:
+            norm_last = _normalize_timestamp(last_seen)
+            gap_seconds = (norm_observed_at - norm_last).total_seconds()
+            if gap_seconds <= self.config.episode_timeout_seconds:
+                is_recurrent = True
+            else:
+                is_recurrent = False
+
+            # Detect desynchronized intermediate state:
+            # When an active episode exists, if some legs have received updates newer than last_seen
+            # while other legs still reflect older snapshots (observed at or prior to last_seen),
+            # this is an intermediate/interleaved tick.
+            has_newer_leg = any(_normalize_timestamp(o.observed_at) > norm_last for o in basket_obs)
+            has_older_leg = any(_normalize_timestamp(o.observed_at) <= norm_last for o in basket_obs)
+            is_intermediate_update = has_newer_leg and has_older_leg
+
+        # Disappearance condition:
+        # ONLY a fresh, trustworthy, fully synchronized snapshot (not an intermediate leg update)
+        # can signal that an active MECE opportunity has disappeared.
         if not candidate.is_arbitrage and candidate.gross_edge_cents <= 0:
+            if is_fresh and not is_intermediate_update and opp_id in active_episodes:
+                del active_episodes[opp_id]
             return None
 
-        # Check recurrence
-        is_recurrent = opp_id in active_episodes
-        active_episodes[opp_id] = observed_at
-
-        # Check multi-leg skew
-        times: List[float] = []
-        for t, ts in source_ts_map.items():
-            if ts is None:
-                if self.config.require_source_timestamp:
-                    return OpportunityEvaluationRecord(
-                        evaluation_id=eval_id,
-                        opportunity_id=opp_id,
-                        strategy_type=strat_type,
-                        observed_at=observed_at,
-                        market_tickers=basket.ordered_tickers,
-                        is_fresh=False,
-                        staleness_reason=f"Missing timestamp for leg {t}",
-                        source_timestamps=source_ts_map,
-                        leg_timestamp_skew_seconds=0.0,
-                        theoretical_gross_edge_cents=candidate.gross_edge_cents,
-                        supported_quantity=0,
-                        entry_cost_cents=0,
-                        expected_payout_cents=0,
-                        configured_fee_cents=self.config.default_fee_per_contract_cents or 0,
-                        conservative_haircut_cents=self.config.conservative_haircut_cents,
-                        net_edge_cents=None,
-                        net_return_pct=None,
-                        is_qualified=False,
-                        status=STATUS_REJECTED_MISSING_TIMESTAMP,
-                        rejection_reason=f"Missing source timestamp for leg {t}",
-                        is_recurrent=is_recurrent,
-                    )
-            else:
-                times.append(ts.timestamp())
-
-        skew_seconds = max(times) - min(times) if len(times) > 1 else 0.0
-        if skew_seconds > self.config.max_leg_timestamp_skew_seconds:
+        if not is_fresh:
+            if is_recurrent:
+                active_episodes[opp_id] = observed_at
             return OpportunityEvaluationRecord(
                 evaluation_id=eval_id,
                 opportunity_id=opp_id,
@@ -974,39 +1074,49 @@ class HistoricalEvaluator:
                 observed_at=observed_at,
                 market_tickers=basket.ordered_tickers,
                 is_fresh=False,
-                staleness_reason=f"Leg timestamp skew {skew_seconds:.2f}s > max {self.config.max_leg_timestamp_skew_seconds:.2f}s",
+                staleness_reason=staleness_reason,
                 source_timestamps=source_ts_map,
                 leg_timestamp_skew_seconds=skew_seconds,
                 theoretical_gross_edge_cents=candidate.gross_edge_cents,
                 supported_quantity=0,
                 entry_cost_cents=0,
                 expected_payout_cents=0,
-                configured_fee_cents=self.config.default_fee_per_contract_cents or 0,
+                configured_fee_cents=self.config.default_fee_per_contract_cents,
                 conservative_haircut_cents=self.config.conservative_haircut_cents,
                 net_edge_cents=None,
                 net_return_pct=None,
                 is_qualified=False,
-                status=STATUS_REJECTED_LEG_SKEW,
-                rejection_reason=f"Excessive leg timestamp skew ({skew_seconds:.2f}s)",
+                status=rejection_status,
+                rejection_reason=staleness_reason,
                 is_recurrent=is_recurrent,
             )
 
-        # V3 Execution Pricing
-        effective_fee = (
-            self.config.default_fee_per_contract_cents or 0
-        ) + self.config.conservative_haircut_cents
+        active_episodes[opp_id] = observed_at
 
+        # V3 Execution Pricing (preserving None)
         pricing = evaluate_mece_basket_execution(
             event=event,
             books_by_outcome=books_by_outcome,
             basket_side=basket.basket_side,
             requested_quantity=self.config.target_quantity,
-            fee_per_contract_cents=effective_fee,
+            fee_per_contract_cents=self.config.default_fee_per_contract_cents,
         )
 
         is_qualified = False
         status = pricing.status
         rejection_reason = pricing.rejection_reason
+
+        # Haircut calculation kept separate from exchange fees
+        total_contracts = sum(t.supported_quantity for t in pricing.leg_traversals)
+        total_haircut_cents = total_contracts * self.config.conservative_haircut_cents
+        modeled_net_profit_cents: Optional[int] = None
+        modeled_is_net_profitable: Optional[bool] = None
+
+        if pricing.net_profit_cents is not None:
+            modeled_net_profit_cents = pricing.net_profit_cents - total_haircut_cents
+            modeled_is_net_profitable = modeled_net_profit_cents > 0
+        elif self.config.default_fee_per_contract_cents is None:
+            modeled_is_net_profitable = None
 
         if pricing.supported_quantity == 0:
             status = STATUS_REJECTED_INSUFFICIENT_DEPTH
@@ -1014,10 +1124,10 @@ class HistoricalEvaluator:
         elif not pricing.is_gross_profitable:
             status = STATUS_REJECTED_NO_GROSS_EDGE
             rejection_reason = "No gross edge across combined basket execution"
-        elif self.config.enforce_net_profitability and pricing.is_net_profitable is False:
+        elif self.config.enforce_net_profitability and modeled_is_net_profitable is False:
             status = STATUS_REJECTED_UNPROFITABLE_FEES
             rejection_reason = "Unprofitable after estimated basket fees and haircut"
-        elif self.config.enforce_net_profitability and pricing.is_net_profitable is None:
+        elif self.config.enforce_net_profitability and modeled_is_net_profitable is None:
             status = STATUS_REJECTED_UNPROFITABLE_FEES
             rejection_reason = "Net profitability cannot be verified without fee configuration"
         else:
@@ -1026,9 +1136,9 @@ class HistoricalEvaluator:
             rejection_reason = None
 
         net_return_pct = None
-        if pricing.net_profit_cents is not None and pricing.total_cost_cents > 0:
+        if modeled_net_profit_cents is not None and pricing.total_cost_cents > 0:
             net_return_pct = (
-                Decimal(pricing.net_profit_cents) / Decimal(pricing.total_cost_cents)
+                Decimal(modeled_net_profit_cents) / Decimal(pricing.total_cost_cents)
             ) * Decimal(100)
 
         return OpportunityEvaluationRecord(
@@ -1045,9 +1155,9 @@ class HistoricalEvaluator:
             supported_quantity=pricing.supported_quantity,
             entry_cost_cents=pricing.total_cost_cents,
             expected_payout_cents=pricing.guaranteed_payout_cents,
-            configured_fee_cents=self.config.default_fee_per_contract_cents or 0,
+            configured_fee_cents=self.config.default_fee_per_contract_cents,
             conservative_haircut_cents=self.config.conservative_haircut_cents,
-            net_edge_cents=pricing.net_profit_cents,
+            net_edge_cents=modeled_net_profit_cents,
             net_return_pct=net_return_pct,
             is_qualified=is_qualified,
             status=status,
@@ -1065,14 +1175,49 @@ class HistoricalEvaluator:
     ) -> PaperTrade:
         """Simulate execution fill and apply to ledger with strict pre-trade risk checks."""
         timestamp_str = obs.observed_at.isoformat()
-        effective_fee = (
-            self.config.default_fee_per_contract_cents or 0
-        ) + self.config.conservative_haircut_cents
 
         trade = executor.simulate_binary_parity(
             obs.order_book,
             requested_quantity=self.config.target_quantity,
-            fee_per_contract_cents=effective_fee,
+            fee_per_contract_cents=self.config.default_fee_per_contract_cents,
+            timestamp=timestamp_str,
+            portfolio=portfolio,
+            risk_manager=risk_manager,
+        )
+
+        if trade.state in (TradeState.FILLED, TradeState.PARTIALLY_FILLED):
+            portfolio.apply_trade_fill(trade, timestamp=timestamp_str)
+            risk_manager.record_processed_trade(trade.trade_id)
+
+        return trade
+
+    def _simulate_paper_trade_mece(
+        self,
+        basket: DeclaredMeceBasket,
+        ticker_latest_obs: Dict[str, MarketObservation],
+        record: OpportunityEvaluationRecord,
+        executor: PaperExecutionEngine,
+        portfolio: PaperPortfolio,
+        risk_manager: RiskManager,
+    ) -> PaperTrade:
+        """Simulate execution fill for a qualified MECE basket and apply to ledger."""
+        timestamp_str = record.observed_at.isoformat()
+        event = Event(
+            identifier=basket.event_ticker,
+            outcomes=basket.outcomes,
+            relationship_established=True,
+        )
+        basket_obs = [ticker_latest_obs[t] for t in basket.market_outcome_map]
+        books_by_outcome = {
+            basket.market_outcome_map[o.ticker]: o.order_book for o in basket_obs
+        }
+
+        trade = executor.simulate_mece_basket(
+            event=event,
+            books_by_outcome=books_by_outcome,
+            basket_side=basket.basket_side,
+            requested_quantity=self.config.target_quantity,
+            fee_per_contract_cents=self.config.default_fee_per_contract_cents,
             timestamp=timestamp_str,
             portfolio=portfolio,
             risk_manager=risk_manager,
@@ -1295,17 +1440,39 @@ def run_sensitivity_analysis(
     rows: List[SensitivityRow] = []
 
     for prof in selected_profiles:
+        resolved_fee = (
+            cfg.default_fee_per_contract_cents
+            if prof.fee_per_contract_cents is _INHERIT
+            else prof.fee_per_contract_cents
+        )
+        resolved_stale = (
+            cfg.max_stale_seconds
+            if prof.max_stale_seconds is _INHERIT
+            else prof.max_stale_seconds
+        )
+        resolved_haircut = (
+            cfg.conservative_haircut_cents
+            if prof.conservative_haircut_cents is _INHERIT
+            else prof.conservative_haircut_cents
+        )
+        resolved_qty = (
+            cfg.target_quantity
+            if prof.target_quantity is _INHERIT
+            else prof.target_quantity
+        )
+
         prof_cfg = EvaluationConfig(
             initial_cash_cents=cfg.initial_cash_cents,
-            target_quantity=prof.target_quantity,
-            default_fee_per_contract_cents=prof.fee_per_contract_cents,
-            max_stale_seconds=prof.max_stale_seconds,
+            target_quantity=resolved_qty,
+            default_fee_per_contract_cents=resolved_fee,
+            max_stale_seconds=resolved_stale,
             max_future_seconds=cfg.max_future_seconds,
             max_leg_timestamp_skew_seconds=cfg.max_leg_timestamp_skew_seconds,
             require_source_timestamp=cfg.require_source_timestamp,
             enforce_net_profitability=cfg.enforce_net_profitability,
             enable_paper_trading=cfg.enable_paper_trading,
-            conservative_haircut_cents=prof.conservative_haircut_cents,
+            conservative_haircut_cents=resolved_haircut,
+            episode_timeout_seconds=cfg.episode_timeout_seconds,
             risk_config=cfg.risk_config,
             declared_baskets=cfg.declared_baskets,
             deduplicate_observations=cfg.deduplicate_observations,
@@ -1332,10 +1499,10 @@ def run_sensitivity_analysis(
         rows.append(
             SensitivityRow(
                 name=prof.name,
-                fee_per_contract_cents=prof.fee_per_contract_cents,
-                conservative_haircut_cents=prof.conservative_haircut_cents,
-                max_stale_seconds=prof.max_stale_seconds,
-                target_quantity=prof.target_quantity,
+                fee_per_contract_cents=resolved_fee,
+                conservative_haircut_cents=resolved_haircut,
+                max_stale_seconds=resolved_stale,
+                target_quantity=resolved_qty,
                 qualified_count=m.qualified_opportunities,
                 qualification_rate_pct=qual_rate,
                 rejections_unprofitable_fees=m.rejections_by_status.get(STATUS_REJECTED_UNPROFITABLE_FEES, 0),
