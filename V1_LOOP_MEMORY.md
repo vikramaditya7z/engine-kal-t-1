@@ -2,22 +2,26 @@
 
 ### Done
 
-Completed V1 closure review. Repository evidence confirms the deterministic V0 contract/portfolio payoff models, V1 normalized market/event/order-book models, GET-only REST client with pagination cycle detection, offline regression test suite, captured real market fixture (`tests/fixtures/kalshi_market_response.json`), and clean packaging manifest (`pyproject.toml`).
+Implemented V2 Arbitrage Detection for the Kalshi Arbitrage Engine in `kalshi_arbitrage/arbitrage.py` and exported public interfaces in `kalshi_arbitrage/__init__.py`.
 
-The `updated_time` timestamp parsing fix and regression tests are verified: strict `strptime` formats parse 1-to-6 fractional second digits with timezone awareness while rejecting naive, malformed, or over-precision timestamps.
+The module implements:
+1. Exact, validated price conversions between V1 `Decimal` dollars and V0 integer cents (`dollars_to_cents`, `cents_to_dollars`), strictly rejecting sub-cent precision to avoid silent rounding loss.
+2. Single-market binary complement parity evaluation (`evaluate_binary_parity` and `evaluate_market_parity`).
+3. MECE event basket arbitrage evaluation across explicitly declared and established event outcomes (`evaluate_mece_event_basket` and `evaluate_mece_markets`).
+4. General portfolio arbitrage evaluation across all declared states (`evaluate_portfolio`).
+5. Structured `ArbitrageOpportunity` result model reporting guaranteed payout, total cost, gross edge in integer cents and Decimal dollars, outcome-by-outcome payout/profit vectors, fee impact, and explicit disclaimers for executability and net profitability.
+6. Rigorous test suite in `tests/test_arbitrage.py` (36 tests) covering valid arbitrage, break-even, no edge, outcome losses despite attractive price sums, invalid/sub-cent prices, undeclared relationships, fees, and boundary conditions.
 
-Bytecode compilation passed (`PYTHONPYCACHEPREFIX=/tmp/kalshi-pycache .venv/bin/python -m compileall -q kalshi_arbitrage scripts tests`). The full offline test suite passed with `.venv/bin/python -m pytest`: 119 passed in 0.09s. Formatting checks passed with `git diff --check`.
-
-A non-mutating live GET command was attempted without changing tracked fixture data; sandboxed network isolation blocked external DNS resolution, raising `KalshiTransportError` as expected. Live verification remains an outstanding operational step for unsandboxed environments.
+Bytecode compilation passed (`PYTHONPYCACHEPREFIX=/tmp/kalshi-pycache .venv/bin/python -m compileall -q kalshi_arbitrage scripts tests`). The full test suite passed with `.venv/bin/python -m pytest`: 155 passed in 0.10s (119 existing V0/V1 tests without regression + 36 new V2 tests). `git diff --check` passed with 0 formatting or whitespace errors. Documentation in `ARCHITECTURE.md` was updated.
 
 ### Worked
 
-The V0/V1 architecture cleanly isolates deterministic financial logic from transport layers and excludes floating-point representation. The offline suite (119 tests) and real fixture normalization run deterministically. `pyproject.toml` correctly configures package metadata and pytest paths.
+Using V0's deterministic `portfolio_payouts_cents` under the hood for event basket and portfolio evaluation ensures 100% mathematical consistency with V0 models. Explicitly requiring `relationship_established=True` prevents unsupported cross-market relationship inferences. Rejecting sub-cent precision preserves exact monetary integrity without floating-point arithmetic.
 
 ### Failed — don't retry
 
-Do not restore or retry the prior `datetime.fromisoformat` path on Python 3.9. Do not run `scripts/smoke_test_markets.py` during audit or review tasks because it unconditionally overwrites `tests/fixtures/kalshi_market_response.json`.
+Do not infer event exhaustiveness or outcome mappings from market titles or tickers. Do not allow floating-point values into monetary paths or silently round sub-cent prices. Do not misrepresent gross theoretical edge as net or executable profit without fee and order-book models.
 
 ### Next
 
-Freeze V1 and await human authorization to stage, commit, and push the prepared release files (6 tracked modified files and `pyproject.toml`). Once V1 is frozen and committed, prepare the V2 specification for arbitrage detection.
+Await human review of V2 changes. All files remain uncommitted. When ready, stage and commit the V2 implementation. The next milestone is V3 — Execution Pricing (order-book depth, exchange fees, liquidity limits, and execution-cost evaluation).

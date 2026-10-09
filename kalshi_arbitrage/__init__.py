@@ -28,6 +28,21 @@ from .rest_client import (
     KalshiRestClient,
     KalshiTransportError,
 )
+from .arbitrage import (
+    OPPORTUNITY_BINARY_PARITY,
+    OPPORTUNITY_MECE_BASKET_LONG_NO,
+    OPPORTUNITY_MECE_BASKET_LONG_YES,
+    OPPORTUNITY_PORTFOLIO,
+    ArbitrageInputError,
+    ArbitrageOpportunity,
+    cents_to_dollars,
+    dollars_to_cents,
+    evaluate_binary_parity,
+    evaluate_market_parity,
+    evaluate_mece_event_basket,
+    evaluate_mece_markets,
+    evaluate_portfolio,
+)
 
 __all__ = [
     "BinaryContract",
@@ -60,4 +75,17 @@ __all__ = [
     "KalshiResponseError",
     "KalshiRestClient",
     "KalshiTransportError",
+    "OPPORTUNITY_BINARY_PARITY",
+    "OPPORTUNITY_MECE_BASKET_LONG_NO",
+    "OPPORTUNITY_MECE_BASKET_LONG_YES",
+    "OPPORTUNITY_PORTFOLIO",
+    "ArbitrageInputError",
+    "ArbitrageOpportunity",
+    "cents_to_dollars",
+    "dollars_to_cents",
+    "evaluate_binary_parity",
+    "evaluate_market_parity",
+    "evaluate_mece_event_basket",
+    "evaluate_mece_markets",
+    "evaluate_portfolio",
 ]

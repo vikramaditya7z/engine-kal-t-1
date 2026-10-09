@@ -4,7 +4,7 @@
 
 The long-term system is a deterministic quantitative research and paper-trading engine for Kalshi prediction markets. It will ingest market observations, represent contracts and settlement payoffs, detect only logically established arbitrage relationships, evaluate executable profitability after costs and liquidity constraints, simulate fills, maintain a paper-trading ledger, and support historical replay and backtesting. No real-money execution is in scope for the initial versions.
 
-This document describes both the intended direction and the currently implemented V0/V1 boundary. V0 and the current V1 market-data foundation are implemented; later roadmap capabilities remain planned.
+This document describes both the intended direction and the currently implemented V0/V1/V2 boundary. V0, V1, and V2 are implemented; later roadmap capabilities remain planned.
 
 ## Roadmap
 
@@ -25,11 +25,11 @@ The versions extend one codebase. Each version should deliver only the capabilit
 
 The strategy layer consumes stable, normalized domain objects—not raw REST or WebSocket response objects. Adapters may change as API details are learned, while domain and strategy logic remain insulated from transport-specific schemas.
 
-Today, the implemented flow ends at normalized data:
+Today, the implemented flow reaches candidate arbitrage detection:
 
-`public REST response → transport/error handling → validation and normalization → normalized market or event model`
+`public REST response → transport/error handling → validation and normalization → normalized market or event model → contract/portfolio payoff model → arbitrage detection`
 
-The V0 contract and portfolio payoff models remain separate. V1 does not infer a mapping from a normalized market to a V0 contract outcome, and it does not perform strategy detection or execution.
+The V2 arbitrage detection engine bridges normalized market data to the deterministic V0 contract and portfolio payoff models. It does not perform execution-cost evaluation, paper execution, or live order placement.
 
 ## Eventual component responsibilities and boundaries
 
@@ -69,9 +69,10 @@ Normalized API prices and quantities use `Decimal` without float parsing or sile
 - **V0 contract/payoff model:** `contract.py` models deterministic binary settlement and gross P/L using integer cents. `portfolio.py` evaluates finite-outcome event portfolios only when the mutually exclusive and collectively exhaustive relationship is explicitly declared.
 - **V1 normalized market-data model:** `market_data.py` validates binary market and event metadata, timestamps, exact `Decimal` prices and quantities, and order-book levels without allowing raw API dictionaries into future strategy code. Unknown lifecycle statuses are preserved as raw status strings rather than treated as open. Event `mutually_exclusive` metadata is preserved, but collective exhaustiveness and cross-market settlement relationships are never inferred.
 - **V1 public REST boundary:** `rest_client.py` supplies a small GET-only client for listing markets with explicit cursor pagination and for fetching one market or event. Each payload is validated and normalized before it is returned. Malformed data is surfaced as an error rather than silently discarded.
-- **V1 verification assets:** pytest coverage includes V0 settlement behavior, market-data validation, REST fake-transport behavior, and a captured public market fixture. `scripts/smoke_test_markets.py` performs the bounded live public market smoke test.
+- **V2 arbitrage detection engine:** `arbitrage.py` evaluates mathematically valid candidate opportunities for single-market binary complement parity and explicitly established MECE event baskets. Exact price conversions ensure no precision loss between `Decimal` dollars and integer cents. Opportunities report worst-case guaranteed payouts across all states, total costs, and gross edge, explicitly qualifying that executability and net profitability are unverified. Relationships are never inferred from market titles or tickers.
+- **Verification assets:** pytest coverage includes V0 settlement behavior, V1 market-data validation, REST fake-transport behavior, a captured public market fixture, and V2 deterministic arbitrage detection across valid, break-even, losing, and malformed candidates.
 
 ### Still planned
 
-WebSockets, live order-book retrieval, authentication, order placement, arbitrage detection, execution-cost pricing, risk controls, paper execution, ledgering, historical replay, and advanced research are not implemented. Implementation should continue to add only the smallest tested capability required by the active roadmap milestone.
+WebSockets, live order-book retrieval, authentication, order placement, execution-cost pricing, risk controls, paper execution, ledgering, historical replay, and advanced research are not implemented. Implementation should continue to add only the smallest tested capability required by the active roadmap milestone.
 
