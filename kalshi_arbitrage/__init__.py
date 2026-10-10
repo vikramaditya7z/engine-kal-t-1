@@ -147,6 +147,16 @@ from .evaluation import (
     evaluate_historical_evidence,
     run_sensitivity_analysis,
 )
+from .v7_validation import (
+    DistributionStats,
+    EvidenceAuditReport,
+    EvidenceAuditor,
+    ObservationGap,
+    V7HistoricalValidator,
+    V7ValidationConfig,
+    V7ValidationReport,
+    validate_historical_dataset,
+)
 
 __all__ = [
     "BinaryContract",
@@ -284,4 +294,12 @@ __all__ = [
     "SensitivityRow",
     "evaluate_historical_evidence",
     "run_sensitivity_analysis",
+    "DistributionStats",
+    "EvidenceAuditReport",
+    "EvidenceAuditor",
+    "ObservationGap",
+    "V7HistoricalValidator",
+    "V7ValidationConfig",
+    "V7ValidationReport",
+    "validate_historical_dataset",
 ]
