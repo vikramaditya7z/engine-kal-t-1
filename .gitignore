@@ -17,3 +17,10 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+
+# Transient paper-trading runtime state and session reports
+data/paper_trading_state.json
+data/paper_session_report.json
+data/paper_session_restart_report.json
+data/audit_validation_state.json
+data/audit_validation_report.json

@@ -1,0 +1,5 @@
+# Kalshi Arbitrage Engine — Development Dependencies
+# The core library uses Python standard library only (zero runtime dependencies).
+
+pytest>=8.0.0
+-e .

@@ -640,3 +640,73 @@ def test_large_requested_quantity_depth_exhaustion():
     assert len(res.consumed_levels) == 2
 
 
+def test_evaluate_binary_parity_with_official_fee_model():
+    from kalshi_arbitrage.fee_model import FeeModelConfig, FeeScheduleType
+    # Book with YES ask at 48¢ (qty 10) and NO ask at 48¢ (qty 10)
+    # NO bids = 52¢ -> YES ask = 48¢
+    # YES bids = 52¢ -> NO ask = 48¢
+    # Gross edge per pair = 100 - (48 + 48) = 4¢.
+    # Total cost for 1 pair = 96¢. Gross profit = 4¢.
+    book = make_book(
+        yes_bids=[("0.5200", "10.00")],
+        no_bids=[("0.5200", "10.00")],
+    )
+
+    # Official fee:
+    # 1 YES at 48¢: ceil(0.07 * 1 * 0.48 * 0.52 * 100) = ceil(1.7472) = 2¢.
+    # 1 NO at 48¢: ceil(0.07 * 1 * 0.48 * 0.52 * 100) = ceil(1.7472) = 2¢.
+    # Total fee across legs = 4¢.
+    # Net profit = 4¢ - 4¢ = 0¢ -> NOT net profitable (break-even).
+    res = evaluate_binary_parity_execution(
+        book,
+        requested_quantity=1,
+        fee_model=FeeModelConfig(schedule_type=FeeScheduleType.KALSHI_OFFICIAL_TAKER),
+    )
+    assert res.is_depth_supported is True
+    assert res.is_gross_profitable is True
+    assert res.estimated_fees_cents == 4
+    assert res.net_profit_cents == 0
+    assert res.is_net_profitable is False
+    assert res.status == "DEPTH_SUPPORTED_NET_UNPROFITABLE"
+
+    # Now with exempt schedule: fee should be 0¢, net profit = 4¢
+    res_exempt = evaluate_binary_parity_execution(
+        book,
+        requested_quantity=1,
+        fee_model=FeeModelConfig(schedule_type=FeeScheduleType.EXEMPT),
+    )
+    assert res_exempt.estimated_fees_cents == 0
+    assert res_exempt.net_profit_cents == 4
+    assert res_exempt.is_net_profitable is True
+    assert res_exempt.status == "DEPTH_SUPPORTED_NET_PROFITABLE"
+
+
+def test_binary_parity_execution_independent_per_leg_fee_rounding():
+    """Verify that YES and NO leg fees are computed independently as discrete exchange orders.
+
+    In a case where YES ask = 30¢ and NO ask = 30¢:
+    - Leg 1 raw fee = 1 * 0.07 * 0.30 * 0.70 * 100 = 1.47¢ -> exchange fee = 2¢.
+    - Leg 2 raw fee = 1 * 0.07 * 0.30 * 0.70 * 100 = 1.47¢ -> exchange fee = 2¢.
+    - Independent calculation: 2¢ + 2¢ = 4¢ fees.
+    - If mistakenly pooled: ceil(1.47 + 1.47) = ceil(2.94) = 3¢ fees (underestimating by 1¢).
+    """
+    from kalshi_arbitrage.fee_model import FeeModelConfig, FeeScheduleType
+    # Book where NO bid is 70¢ (derived YES ask is 30¢), and YES bid is 70¢ (derived NO ask is 30¢)
+    book = make_book(
+        yes_bids=[("0.7000", "10.00")],
+        no_bids=[("0.7000", "10.00")],
+    )
+
+    res = evaluate_binary_parity_execution(
+        book,
+        requested_quantity=1,
+        fee_model=FeeModelConfig(schedule_type=FeeScheduleType.KALSHI_OFFICIAL_TAKER),
+    )
+    # Must be 4¢, NOT 3¢
+    assert res.estimated_fees_cents == 4
+    # Gross profit = 100 - (30 + 30) = 40¢
+    # Net profit = 40 - 4 = 36¢
+    assert res.net_profit_cents == 36
+    assert res.is_net_profitable is True
+
+

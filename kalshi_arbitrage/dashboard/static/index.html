@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kalshi Arbitrage Engine — Dashboard</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body class="theme-dark">
+  <!-- Header Bar -->
+  <header class="top-nav">
+    <div class="nav-brand">
+      <div class="brand-titles">
+        <h1 class="brand-name">Kalshi Arbitrage</h1>
+        <span class="brand-sub">Engine Dashboard</span>
+      </div>
+    </div>
+
+    <div class="nav-controls">
+      <!-- Dataset Picker -->
+      <div class="control-item">
+        <label for="dataset-select" class="control-label">Dataset</label>
+        <select id="dataset-select" class="select-input" title="Select observation dataset">
+          <option value="" disabled selected>Loading...</option>
+        </select>
+      </div>
+
+      <!-- Compact Observer Status -->
+      <div id="observer-status-pill" class="status-indicator status-stopped" title="Host observer process status">
+        <span class="status-dot"></span>
+        <span id="observer-status-text" class="status-text">Stopped</span>
+      </div>
+
+      <!-- Compact Environment Tag -->
+      <span id="env-pill" class="env-badge">Demo</span>
+
+      <!-- Primary Action: Refresh -->
+      <button id="refresh-btn" class="btn btn-primary" title="Refresh metrics from disk">
+        <svg class="btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        Refresh
+      </button>
+
+      <!-- Secondary Control: Auto-refresh -->
+      <label class="auto-refresh-control" title="Poll every 5 seconds">
+        <input type="checkbox" id="auto-refresh-toggle">
+        <span>Auto-refresh</span>
+      </label>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="main-tabs">
+    <div class="tabs-container">
+      <button class="tab-button active" data-tab="overview">Overview</button>
+      <button class="tab-button" data-tab="markets">Market Monitoring</button>
+      <button class="tab-button" data-tab="opportunities">Opportunities</button>
+      <button class="tab-button" data-tab="historical">Historical Evidence</button>
+      <button class="tab-button" data-tab="health">System Health</button>
+    </div>
+  </nav>
+
+  <!-- Main View Area -->
+  <main class="page-container">
+
+    <!-- TAB 1: OVERVIEW -->
+    <section id="tab-overview" class="view-panel active">
+      <!-- 4 Primary Metrics -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Markets observed</div>
+          <div class="metric-value font-mono" id="kpi-markets-count">—</div>
+          <div class="metric-caption" id="kpi-events-count">Unique contracts in dataset</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Observations</div>
+          <div class="metric-value font-mono" id="kpi-total-obs">—</div>
+          <div class="metric-caption" id="kpi-obs-span">Total recorded snapshots</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Data freshness</div>
+          <div class="metric-value font-mono" id="kpi-freshness-age">—</div>
+          <div class="metric-caption" id="kpi-freshness-ts">Historical recorded evidence</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Qualified opportunities</div>
+          <div class="metric-value font-mono" id="kpi-opps-qualified">0</div>
+          <div class="metric-caption" id="kpi-opps-sub">0 candidates detected</div>
+        </div>
+      </div>
+
+      <!-- Simplified Opportunity Breakdown -->
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Opportunity breakdown</h2>
+            <p class="panel-subtitle">Qualification progression across order-book depth, fees, and freshness</p>
+          </div>
+          <button id="toggle-funnel-btn" class="btn btn-ghost">Collapse</button>
+        </div>
+
+        <div id="funnel-breakdown-body">
+          <div class="breakdown-grid">
+            <div class="breakdown-item">
+              <span class="breakdown-num font-mono" id="funnel-raw">0</span>
+              <span class="breakdown-name">Raw observations</span>
+            </div>
+            <div class="breakdown-item">
+              <span class="breakdown-num font-mono" id="funnel-fresh">0</span>
+              <span class="breakdown-name">Fresh order books</span>
+            </div>
+            <div class="breakdown-item">
+              <span class="breakdown-num font-mono" id="funnel-cand">0</span>
+              <span class="breakdown-name">Theoretical candidates</span>
+            </div>
+            <div class="breakdown-item">
+              <span class="breakdown-num font-mono" id="funnel-depth">0</span>
+              <span class="breakdown-name">Depth supported</span>
+            </div>
+            <div class="breakdown-item">
+              <span class="breakdown-num font-mono" id="funnel-net">0</span>
+              <span class="breakdown-name">Net profitable</span>
+            </div>
+            <div class="breakdown-item highlight-item">
+              <span class="breakdown-num font-mono" id="funnel-qual">0</span>
+              <span class="breakdown-name">Qualified</span>
+            </div>
+          </div>
+
+          <div class="breakdown-note">
+            All order books in this recording currently have 0 resting counterparty bids. To prevent execution without liquidity, the deterministic engine correctly rejects all trades (fail-closed integrity).
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: MARKET MONITORING -->
+    <section id="tab-markets" class="view-panel">
+      <div class="content-panel">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <input type="text" id="market-search" class="search-input" placeholder="Search markets by ticker or title...">
+          </div>
+          <div class="filter-group">
+            <button class="filter-btn active" data-filter="ALL">All (<span id="count-all">0</span>)</button>
+            <button class="filter-btn" data-filter="POPULATED">Populated (<span id="count-pop">0</span>)</button>
+            <button class="filter-btn" data-filter="EMPTY">Empty (<span id="count-empty">0</span>)</button>
+            <button class="filter-btn" data-filter="STALE">Stale (<span id="count-stale">0</span>)</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="markets-table">
+            <thead>
+              <tr>
+                <th>Market</th>
+                <th>Yes (Bid / Ask)</th>
+                <th>No (Bid / Ask)</th>
+                <th>Order book status</th>
+                <th>Last observed</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="markets-tbody">
+              <tr>
+                <td colspan="6" class="table-empty">Loading market observations...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: OPPORTUNITIES -->
+    <section id="tab-opportunities" class="view-panel">
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Arbitrage opportunities</h2>
+            <p class="panel-subtitle">Single-market binary parity and MECE event baskets</p>
+          </div>
+          <div class="segmented-control">
+            <button id="btn-opp-real" class="segment-btn active">Real evidence</button>
+            <button id="btn-opp-sim" class="segment-btn">Simulation demo</button>
+          </div>
+        </div>
+
+        <!-- Simulated Disclaimer Callout -->
+        <div id="simulated-warning-banner" class="callout callout-amber hidden">
+          <span class="callout-tag">Simulation Demo</span>
+          <span>Viewing synthetic records for UI layout testing. These records do not represent real market activity or live execution.</span>
+        </div>
+
+        <!-- Opportunities Content -->
+        <div id="opportunities-content">
+          <div class="table-container">
+            <table class="data-table" id="opportunities-table">
+              <thead>
+                <tr>
+                  <th>Opportunity</th>
+                  <th>Strategy</th>
+                  <th>Status</th>
+                  <th>Payout</th>
+                  <th>Cost</th>
+                  <th>Gross edge</th>
+                  <th>Depth</th>
+                  <th>Fee</th>
+                  <th>Net edge</th>
+                  <th>Reason / Notes</th>
+                </tr>
+              </thead>
+              <tbody id="opportunities-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: HISTORICAL EVIDENCE -->
+    <section id="tab-historical" class="view-panel">
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Historical evidence & audit</h2>
+            <p class="panel-subtitle">V7 provenance auditing, cadence analysis, and empirical evaluation</p>
+          </div>
+        </div>
+
+        <!-- Summary Grid -->
+        <div class="audit-summary-grid">
+          <div class="summary-card">
+            <h3 class="summary-card-title">Dataset provenance</h3>
+            <div class="summary-row"><span class="summary-key">Total records:</span><span class="summary-val font-mono" id="aud-total">0</span></div>
+            <div class="summary-row"><span class="summary-key">Valid observations:</span><span class="summary-val font-mono" id="aud-valid">0</span></div>
+            <div class="summary-row"><span class="summary-key">Freshness pass rate:</span><span class="summary-val font-mono" id="aud-fresh-rate">100.0%</span></div>
+            <div class="summary-row"><span class="summary-key">Empty order books:</span><span class="summary-val font-mono" id="aud-empty">44 (100%)</span></div>
+            <div class="summary-row"><span class="summary-key">Cumulative bid depth:</span><span class="summary-val font-mono" id="aud-depth">0 contracts</span></div>
+          </div>
+
+          <div class="summary-card">
+            <h3 class="summary-card-title">Temporal cadence</h3>
+            <div class="summary-row"><span class="summary-key">Earliest snapshot:</span><span class="summary-val font-mono" id="aud-earliest">—</span></div>
+            <div class="summary-row"><span class="summary-key">Latest snapshot:</span><span class="summary-val font-mono" id="aud-latest">—</span></div>
+            <div class="summary-row"><span class="summary-key">Duration span:</span><span class="summary-val" id="aud-span">—</span></div>
+            <div class="summary-row"><span class="summary-key">Mean polling interval:</span><span class="summary-val font-mono" id="aud-mean-interval">—</span></div>
+            <div class="summary-row"><span class="summary-key">Cadence gaps:</span><span class="summary-val font-mono" id="aud-gaps">0</span></div>
+          </div>
+
+          <div class="summary-card">
+            <h3 class="summary-card-title">Model assumptions</h3>
+            <div class="summary-row"><span class="summary-key">Target quantity:</span><span class="summary-val font-mono">1 contract</span></div>
+            <div class="summary-row"><span class="summary-key">Exchange fee / contract:</span><span class="summary-val font-mono">1¢</span></div>
+            <div class="summary-row"><span class="summary-key">Slippage haircut:</span><span class="summary-val font-mono">0¢</span></div>
+            <div class="summary-row"><span class="summary-key">Max stale tolerance:</span><span class="summary-val font-mono">60.0s</span></div>
+            <div class="summary-row"><span class="summary-key">Net profitability check:</span><span class="summary-val">Enforced</span></div>
+          </div>
+        </div>
+
+        <!-- Section 10 Verdict -->
+        <div class="verdict-card">
+          <div class="verdict-title">Final evidence-backed audit verdict</div>
+          <div class="verdict-body" id="aud-verdict">Loading verdict...</div>
+        </div>
+
+        <!-- Collapsible Raw Report -->
+        <div class="report-toggle-area">
+          <button id="toggle-full-report-btn" class="btn btn-secondary">View complete 10-section audit report</button>
+          <pre id="raw-v7-report" class="code-block hidden"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: SYSTEM HEALTH -->
+    <section id="tab-health" class="view-panel">
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">System diagnostics & health</h2>
+            <p class="panel-subtitle">Process monitoring, storage durability, and operational warnings</p>
+          </div>
+        </div>
+
+        <div class="health-summary-grid">
+          <div class="summary-card">
+            <h3 class="summary-card-title">Observer process</h3>
+            <div class="summary-row"><span class="summary-key">Status:</span><span class="summary-val font-mono" id="hlth-status">—</span></div>
+            <div class="summary-row"><span class="summary-key">Process ID (PID):</span><span class="summary-val font-mono" id="hlth-pid">—</span></div>
+            <div class="summary-row"><span class="summary-key">Environment:</span><span class="summary-val" id="hlth-env">—</span></div>
+            <div class="summary-row"><span class="summary-key">Last checked:</span><span class="summary-val font-mono" id="hlth-checked">—</span></div>
+            <div class="summary-row"><span class="summary-key">Active command:</span><span class="summary-val font-mono" id="hlth-cmd">—</span></div>
+          </div>
+
+          <div class="summary-card">
+            <h3 class="summary-card-title">Paper trading runtime (V9)</h3>
+            <div class="summary-row"><span class="summary-key">Execution mode:</span><span class="summary-val font-mono" id="hlth-paper-mode">PAPER (Simulated)</span></div>
+            <div class="summary-row"><span class="summary-key">Runtime status:</span><span class="summary-val font-mono" id="hlth-paper-status">—</span></div>
+            <div class="summary-row"><span class="summary-key">Session ID:</span><span class="summary-val font-mono" id="hlth-paper-session">—</span></div>
+            <div class="summary-row"><span class="summary-key">Available cash:</span><span class="summary-val font-mono" id="hlth-paper-cash">—</span></div>
+            <div class="summary-row"><span class="summary-key">Book equity:</span><span class="summary-val font-mono" id="hlth-paper-equity">—</span></div>
+            <div class="summary-row"><span class="summary-key">Simulated trades:</span><span class="summary-val font-mono" id="hlth-paper-trades">—</span></div>
+          </div>
+
+          <div class="summary-card">
+            <h3 class="summary-card-title">Storage diagnostics</h3>
+            <div class="summary-row"><span class="summary-key">Workspace root:</span><span class="summary-val font-mono" id="hlth-workspace">—</span></div>
+            <div class="summary-row"><span class="summary-key">Discovered datasets:</span><span class="summary-val font-mono" id="hlth-dataset-count">0</span></div>
+            <div class="summary-row"><span class="summary-key">Total records:</span><span class="summary-val font-mono" id="hlth-total-records">0</span></div>
+            <div class="summary-row"><span class="summary-key">Storage footprint:</span><span class="summary-val font-mono" id="hlth-storage-bytes">0 KB</span></div>
+            <div class="summary-row"><span class="summary-key">Durability:</span><span class="summary-val">Atomic append + os.fsync()</span></div>
+          </div>
+        </div>
+
+        <div class="notices-card">
+          <h3 class="notices-title">Operational notices</h3>
+          <ul id="warnings-list" class="notices-list">
+            <li>All system diagnostics normal.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Market Detail Modal -->
+  <div id="market-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-market-ticker">Market details</h3>
+        <button id="modal-close-btn" class="modal-close-button">&times;</button>
+      </div>
+      <div class="modal-content" id="modal-market-body">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <span>Kalshi Arbitrage Engine &bull; Read-Only Terminal V1.1 &bull; Deterministic Strategy</span>
+    <span id="footer-server-time" class="font-mono">UTC: —</span>
+  </footer>
+
+  <script src="/dashboard.js"></script>
+</body>
+</html>

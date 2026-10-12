@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.1",
+  "session_id": "v11-1791808878-0e7dfe8f",
+  "session_name": "v11_collection_session",
+  "started_at": "2026-10-12T12:41:18.121105+00:00",
+  "completed_at": "2026-10-12T12:41:29.741614+00:00",
+  "total_cycles": 2,
+  "total_requests": 12,
+  "successful_observations": 10,
+  "diagnostic_events_count": 0,
+  "unique_tickers": [
+    "KXMVECROSSCATEGORY-S20260A7EF5C6D96-10E0883B1BE",
+    "KXMVECROSSCATEGORY-S20262D9572A63BB-B17278264CC",
+    "KXMVECROSSCATEGORY-S202662DCE099C32-B4F221D9587",
+    "KXMVECROSSCATEGORY-S20268AD97C68611-5B7107D4B58",
+    "KXMVECROSSCATEGORY-S2026B93FEEABA39-9674056360A"
+  ],
+  "observations_sha256": "9d488930173b6d72897d049b6bd6371d043d52b1a9148289856554fdec26f731",
+  "diagnostics_sha256": null,
+  "manifest_sha256": "4e58add03695d5c19575e5a642e29c30bb6447c985a4a3e123d6faa2c542071c",
+  "collector_config": {
+    "session_name": "v11_collection_session",
+    "max_markets_per_cycle": 5,
+    "poll_interval_seconds": 1.0,
+    "min_request_interval_seconds": 0.1,
+    "max_stale_seconds": 60.0,
+    "max_cycles": 2,
+    "max_duration_seconds": null,
+    "max_observations": null,
+    "enable_prospective_evaluation": true
+  },
+  "system_environment": {
+    "python_version": "3.9.6",
+    "pid": 44658,
+    "cwd": "/Users/vikramaditya/Disk/Projects/Kalshi"
+  }
+}

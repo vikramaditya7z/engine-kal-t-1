@@ -1,127 +1,82 @@
 {
   "market": {
     "can_close_early": true,
-    "close_time": "2026-10-16T19:00:00Z",
-    "created_time": "2026-10-09T10:48:24.916142Z",
+    "close_time": "2026-10-14T19:15:00Z",
+    "created_time": "2026-10-12T07:44:36.908003Z",
     "custom_strike": {
-      "Associated Events": "KXBUNDESLIGATOTAL-26OCT09BVBSVW,KXBUNDESLIGATOTAL-26OCT10FCABMU,KXEFLCHAMPIONSHIPTOTAL-26OCT09WHUQPR,KXLALIGAGAME-26OCT10BARGET,KXLALIGATOTAL-26OCT10ALAATM,KXLIGUE1TOTAL-26OCT10PSGMAN,KXSERIEAGAME-26OCT10INTPAR,KXSERIEAGAME-26OCT11CAGJUV,KXSERIEAGAME-26OCT11SASACM,KXSERIEATOTAL-26OCT11COMROM,KXUCLGAME-26OCT13ARSLIL,KXUCLGAME-26OCT13SBHSLA,KXUCLGAME-26OCT13VIKBMU,KXUCLGAME-26OCT14BOGBVB,KXUCLGAME-26OCT14ROMRMA,KXUCLTOTAL-26OCT13GALBAR,KXUCLTOTAL-26OCT14ASKLFC,KXUCLTOTAL-26OCT14MCIPSG,KXUCLTOTAL-26OCT14SLOVFB",
-      "Associated Market Sides": "yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes",
-      "Associated Markets": "KXBUNDESLIGATOTAL-26OCT09BVBSVW-2,KXBUNDESLIGATOTAL-26OCT10FCABMU-2,KXEFLCHAMPIONSHIPTOTAL-26OCT09WHUQPR-1,KXLALIGAGAME-26OCT10BARGET-BAR,KXLALIGATOTAL-26OCT10ALAATM-1,KXLIGUE1TOTAL-26OCT10PSGMAN-2,KXSERIEAGAME-26OCT10INTPAR-INT,KXSERIEAGAME-26OCT11CAGJUV-JUV,KXSERIEAGAME-26OCT11SASACM-ACM,KXSERIEATOTAL-26OCT11COMROM-1,KXUCLGAME-26OCT13ARSLIL-ARS,KXUCLGAME-26OCT13SBHSLA-SLA,KXUCLGAME-26OCT13VIKBMU-BMU,KXUCLGAME-26OCT14BOGBVB-BVB,KXUCLGAME-26OCT14ROMRMA-RMA,KXUCLTOTAL-26OCT13GALBAR-2,KXUCLTOTAL-26OCT14ASKLFC-2,KXUCLTOTAL-26OCT14MCIPSG-2,KXUCLTOTAL-26OCT14SLOVFB-2",
-      "Multivariate Event Ticker": "KXMVECROSSCATEGORY-S2026A6938A377B1"
+      "Associated Events": "KXALLSVENSKANGAME-26OCT12ELFHAL,KXARGPREMDIVGAME-26OCT12LANVEL,KXBRASILEIROBGAME-26OCT12FORBRA,KXEPLGAME-26OCT12COVNEW,KXLALIGA2GAME-26OCT12VLLALB,KXLALIGAGAME-26OCT12LEVSEV,KXLIGAPORTUGALGAME-26OCT12FAMALV,KXSERIEAGAME-26OCT12ATAVEN,KXSERIEAGAME-26OCT12TORUDI,KXSUPERLIGGAME-26OCT12EYUGOZ",
+      "Associated Market Sides": "yes,no,no,no,no,no,no,yes,no,no",
+      "Associated Markets": "KXALLSVENSKANGAME-26OCT12ELFHAL-ELF,KXARGPREMDIVGAME-26OCT12LANVEL-VEL,KXBRASILEIROBGAME-26OCT12FORBRA-BRA,KXEPLGAME-26OCT12COVNEW-COV,KXLALIGA2GAME-26OCT12VLLALB-ALB,KXLALIGAGAME-26OCT12LEVSEV-LEV,KXLIGAPORTUGALGAME-26OCT12FAMALV-ALV,KXSERIEAGAME-26OCT12ATAVEN-ATA,KXSERIEAGAME-26OCT12TORUDI-TOR,KXSUPERLIGGAME-26OCT12EYUGOZ-EYU",
+      "Multivariate Event Ticker": "KXMVECROSSCATEGORY-S202626D27E5BE85"
     },
-    "event_ticker": "KXMVECROSSCATEGORY-S2026A6938A377B1",
+    "event_ticker": "KXMVECROSSCATEGORY-S202626D27E5BE85",
     "exchange_index": 1,
-    "expected_expiration_time": "2026-10-15T01:00:00Z",
-    "expiration_time": "2026-10-16T19:00:00Z",
+    "expected_expiration_time": "2026-10-13T01:15:00Z",
+    "expiration_time": "2026-10-14T19:15:00Z",
     "expiration_value": "",
     "is_provisional": true,
     "last_price_dollars": "0.0000",
-    "latest_expiration_time": "2026-10-16T19:00:00Z",
+    "latest_expiration_time": "2026-10-14T19:15:00Z",
     "market_type": "binary",
     "mve_collection_ticker": "KXMVECROSSCATEGORY-R",
     "mve_selected_legs": [
       {
-        "event_ticker": "KXBUNDESLIGATOTAL-26OCT09BVBSVW",
-        "market_ticker": "KXBUNDESLIGATOTAL-26OCT09BVBSVW-2",
+        "event_ticker": "KXALLSVENSKANGAME-26OCT12ELFHAL",
+        "market_ticker": "KXALLSVENSKANGAME-26OCT12ELFHAL-ELF",
         "side": "yes"
       },
       {
-        "event_ticker": "KXBUNDESLIGATOTAL-26OCT10FCABMU",
-        "market_ticker": "KXBUNDESLIGATOTAL-26OCT10FCABMU-2",
+        "event_ticker": "KXARGPREMDIVGAME-26OCT12LANVEL",
+        "market_ticker": "KXARGPREMDIVGAME-26OCT12LANVEL-VEL",
+        "side": "no"
+      },
+      {
+        "event_ticker": "KXBRASILEIROBGAME-26OCT12FORBRA",
+        "market_ticker": "KXBRASILEIROBGAME-26OCT12FORBRA-BRA",
+        "side": "no"
+      },
+      {
+        "event_ticker": "KXEPLGAME-26OCT12COVNEW",
+        "market_ticker": "KXEPLGAME-26OCT12COVNEW-COV",
+        "side": "no"
+      },
+      {
+        "event_ticker": "KXLALIGA2GAME-26OCT12VLLALB",
+        "market_ticker": "KXLALIGA2GAME-26OCT12VLLALB-ALB",
+        "side": "no"
+      },
+      {
+        "event_ticker": "KXLALIGAGAME-26OCT12LEVSEV",
+        "market_ticker": "KXLALIGAGAME-26OCT12LEVSEV-LEV",
+        "side": "no"
+      },
+      {
+        "event_ticker": "KXLIGAPORTUGALGAME-26OCT12FAMALV",
+        "market_ticker": "KXLIGAPORTUGALGAME-26OCT12FAMALV-ALV",
+        "side": "no"
+      },
+      {
+        "event_ticker": "KXSERIEAGAME-26OCT12ATAVEN",
+        "market_ticker": "KXSERIEAGAME-26OCT12ATAVEN-ATA",
         "side": "yes"
       },
       {
-        "event_ticker": "KXEFLCHAMPIONSHIPTOTAL-26OCT09WHUQPR",
-        "market_ticker": "KXEFLCHAMPIONSHIPTOTAL-26OCT09WHUQPR-1",
-        "side": "yes"
+        "event_ticker": "KXSERIEAGAME-26OCT12TORUDI",
+        "market_ticker": "KXSERIEAGAME-26OCT12TORUDI-TOR",
+        "side": "no"
       },
       {
-        "event_ticker": "KXLALIGAGAME-26OCT10BARGET",
-        "market_ticker": "KXLALIGAGAME-26OCT10BARGET-BAR",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXLALIGATOTAL-26OCT10ALAATM",
-        "market_ticker": "KXLALIGATOTAL-26OCT10ALAATM-1",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXLIGUE1TOTAL-26OCT10PSGMAN",
-        "market_ticker": "KXLIGUE1TOTAL-26OCT10PSGMAN-2",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXSERIEAGAME-26OCT10INTPAR",
-        "market_ticker": "KXSERIEAGAME-26OCT10INTPAR-INT",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXSERIEAGAME-26OCT11CAGJUV",
-        "market_ticker": "KXSERIEAGAME-26OCT11CAGJUV-JUV",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXSERIEAGAME-26OCT11SASACM",
-        "market_ticker": "KXSERIEAGAME-26OCT11SASACM-ACM",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXSERIEATOTAL-26OCT11COMROM",
-        "market_ticker": "KXSERIEATOTAL-26OCT11COMROM-1",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLGAME-26OCT13ARSLIL",
-        "market_ticker": "KXUCLGAME-26OCT13ARSLIL-ARS",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLGAME-26OCT13SBHSLA",
-        "market_ticker": "KXUCLGAME-26OCT13SBHSLA-SLA",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLGAME-26OCT13VIKBMU",
-        "market_ticker": "KXUCLGAME-26OCT13VIKBMU-BMU",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLGAME-26OCT14BOGBVB",
-        "market_ticker": "KXUCLGAME-26OCT14BOGBVB-BVB",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLGAME-26OCT14ROMRMA",
-        "market_ticker": "KXUCLGAME-26OCT14ROMRMA-RMA",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLTOTAL-26OCT13GALBAR",
-        "market_ticker": "KXUCLTOTAL-26OCT13GALBAR-2",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLTOTAL-26OCT14ASKLFC",
-        "market_ticker": "KXUCLTOTAL-26OCT14ASKLFC-2",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLTOTAL-26OCT14MCIPSG",
-        "market_ticker": "KXUCLTOTAL-26OCT14MCIPSG-2",
-        "side": "yes"
-      },
-      {
-        "event_ticker": "KXUCLTOTAL-26OCT14SLOVFB",
-        "market_ticker": "KXUCLTOTAL-26OCT14SLOVFB-2",
-        "side": "yes"
+        "event_ticker": "KXSUPERLIGGAME-26OCT12EYUGOZ",
+        "market_ticker": "KXSUPERLIGGAME-26OCT12EYUGOZ-EYU",
+        "side": "no"
       }
     ],
     "no_ask_dollars": "1.0000",
     "no_bid_dollars": "1.0000",
-    "no_sub_title": "yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 0.5 goals scored,yes Barcelona,yes Over 0.5 goals scored,yes Over 1.5 goals scored,yes Inter,yes Juventus,yes Milan,yes Over 0.5 goals scored,yes Arsenal,yes Slavia Prague,yes Bayern Munich,yes Dortmund,yes Real Madrid,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored",
+    "no_sub_title": "yes Elfsborg,no Velez Sarsfield,no CR Brasil,no Coventry,no Albacete,no Levante,no Alverca,yes Atalanta,no Torino,no Eyupspor",
     "notional_value_dollars": "1.0000",
     "open_interest_fp": "0.00",
-    "open_time": "2026-10-09T10:48:24Z",
+    "open_time": "2026-10-12T07:44:36Z",
     "previous_price_dollars": "0.0000",
     "previous_yes_ask_dollars": "0.0000",
     "previous_yes_bid_dollars": "0.0000",
@@ -150,15 +105,15 @@
     "settlement_timer_seconds": 5,
     "status": "active",
     "strike_type": "custom",
-    "ticker": "KXMVECROSSCATEGORY-S2026A6938A377B1-AACA3553E9C",
-    "title": "yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 0.5 goals scored,yes Barcelona,yes Over 0.5 goals scored,yes Over 1.5 goals scored,yes Inter,yes Juventus,yes Milan,yes Over 0.5 goals scored,yes Arsenal,yes Slavia Prague,yes Bayern Munich,yes Dortmund,yes Real Madrid,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored",
-    "updated_time": "2026-10-09T10:48:24.916173Z",
+    "ticker": "KXMVECROSSCATEGORY-S202626D27E5BE85-1BB0357C619",
+    "title": "yes Elfsborg,no Velez Sarsfield,no CR Brasil,no Coventry,no Albacete,no Levante,no Alverca,yes Atalanta,no Torino,no Eyupspor",
+    "updated_time": "2026-10-12T07:44:37.304332Z",
     "volume_24h_fp": "0.00",
     "volume_fp": "0.00",
     "yes_ask_dollars": "0.0000",
     "yes_ask_size_fp": "0.00",
     "yes_bid_dollars": "0.0000",
     "yes_bid_size_fp": "0.00",
-    "yes_sub_title": "yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 0.5 goals scored,yes Barcelona,yes Over 0.5 goals scored,yes Over 1.5 goals scored,yes Inter,yes Juventus,yes Milan,yes Over 0.5 goals scored,yes Arsenal,yes Slavia Prague,yes Bayern Munich,yes Dortmund,yes Real Madrid,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored"
+    "yes_sub_title": "yes Elfsborg,no Velez Sarsfield,no CR Brasil,no Coventry,no Albacete,no Levante,no Alverca,yes Atalanta,no Torino,no Eyupspor"
   }
 }

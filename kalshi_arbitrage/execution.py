@@ -31,6 +31,7 @@ from .arbitrage import (
     dollars_to_cents,
 )
 from .contract import BinaryContract, ContractInputError, NO, YES
+from .fee_model import FeeModelConfig, FillTier, calculate_multi_level_fee
 from .market_data import NormalizedMarket, NormalizedOrderBook, OrderBookLevel
 from .portfolio import Event, Portfolio, Position, portfolio_payouts_cents
 
@@ -286,6 +287,9 @@ def evaluate_binary_parity_execution(
     book: NormalizedOrderBook,
     requested_quantity: int = 1,
     fee_per_contract_cents: Optional[int] = None,
+    *,
+    fee_model: Optional[FeeModelConfig] = None,
+    series_ticker: Optional[str] = None,
 ) -> ExecutionPricingResult:
     """Evaluate single-market binary parity (1 YES + 1 NO) against book depth.
 
@@ -324,6 +328,8 @@ def evaluate_binary_parity_execution(
             leg_traversals=(trav_yes, trav_no),
             fee_per_contract_cents=fee_cents,
             rejection_reason=reason,
+            fee_model=fee_model,
+            series_ticker=series_ticker,
         )
 
     # If common quantity is less than requested, re-traverse exactly at common_qty
@@ -360,6 +366,8 @@ def evaluate_binary_parity_execution(
         leg_traversals=(trav_yes, trav_no),
         fee_per_contract_cents=fee_cents,
         rejection_reason=reason,
+        fee_model=fee_model,
+        series_ticker=series_ticker,
     )
 
 
@@ -369,6 +377,9 @@ def evaluate_mece_basket_execution(
     basket_side: str = YES,
     requested_quantity: int = 1,
     fee_per_contract_cents: Optional[int] = None,
+    *,
+    fee_model: Optional[FeeModelConfig] = None,
+    series_ticker: Optional[str] = None,
 ) -> ExecutionPricingResult:
     """Evaluate an MECE event basket against depth from each outcome's order book.
 
@@ -406,6 +417,8 @@ def evaluate_mece_basket_execution(
                 "Undeclared outcome relationship: event must have relationship_established=True "
                 "(mutually exclusive and collectively exhaustive relationship is not established)"
             ),
+            fee_model=fee_model,
+            series_ticker=series_ticker,
         )
 
     missing_outcomes = [o for o in event.outcomes if o not in books_by_outcome]
@@ -452,6 +465,8 @@ def evaluate_mece_basket_execution(
             leg_traversals=tuple(initial_traversals),
             fee_per_contract_cents=fee_cents,
             rejection_reason=f"Insufficient depth on market(s): {unfunded_outcomes}",
+            fee_model=fee_model,
+            series_ticker=series_ticker,
         )
 
     # Re-traverse at exact common quantity if partial
@@ -497,6 +512,8 @@ def evaluate_mece_basket_execution(
         leg_traversals=tuple(final_traversals),
         fee_per_contract_cents=fee_cents,
         rejection_reason=reason,
+        fee_model=fee_model,
+        series_ticker=series_ticker,
     )
 
 
@@ -505,6 +522,9 @@ def evaluate_portfolio_execution(
     books_by_contract: Mapping[str, NormalizedOrderBook],
     unit_quantity: int = 1,
     fee_per_contract_cents: Optional[int] = None,
+    *,
+    fee_model: Optional[FeeModelConfig] = None,
+    series_ticker: Optional[str] = None,
 ) -> ExecutionPricingResult:
     """Evaluate an arbitrary Portfolio against depth from order books.
 
@@ -639,6 +659,8 @@ def evaluate_portfolio_execution(
         leg_traversals=tuple(final_traversals),
         fee_per_contract_cents=fee_cents,
         rejection_reason=reason,
+        fee_model=fee_model,
+        series_ticker=series_ticker,
     )
 
 
@@ -654,6 +676,8 @@ def _build_execution_result(
     leg_traversals: Tuple[DepthTraversalResult, ...],
     fee_per_contract_cents: Optional[int],
     rejection_reason: Optional[str] = None,
+    fee_model: Optional[FeeModelConfig] = None,
+    series_ticker: Optional[str] = None,
 ) -> ExecutionPricingResult:
     gross_profit_cents = guaranteed_payout_cents - total_cost_cents
     is_gross_profitable = gross_profit_cents > 0 and supported_quantity > 0
@@ -684,25 +708,55 @@ def _build_execution_result(
     is_net_profitable: Optional[bool] = None
     qualifications = list(_EXECUTION_DISCLAIMER)
 
-    if fee_per_contract_cents is not None and supported_quantity > 0:
-        est_fees_cents = total_contracts_filled * fee_per_contract_cents
-        est_fees_dollars = cents_to_dollars(est_fees_cents)
-        net_profit_cents = gross_profit_cents - est_fees_cents
-        net_profit_dollars = cents_to_dollars(net_profit_cents)
-        is_net_profitable = net_profit_cents > 0
+    if supported_quantity > 0:
+        if fee_model is not None:
+            # Calculate fees independently per leg because each leg represents a separate exchange order
+            total_fee_c = 0
+            total_fee_d = Decimal("0.00")
+            leg_explanations = []
+            for trav in leg_traversals:
+                leg_tiers = [
+                    FillTier(price_cents=lvl.price_cents, quantity=lvl.quantity)
+                    for lvl in trav.consumed_levels
+                ]
+                if leg_tiers:
+                    leg_fee = calculate_multi_level_fee(
+                        leg_tiers, config=fee_model, series_ticker=series_ticker
+                    )
+                    total_fee_c += leg_fee.total_fee_cents
+                    total_fee_d += leg_fee.total_fee_dollars
+                    leg_explanations.append(f"{trav.side.upper()}: {leg_fee.total_fee_cents}¢")
+            est_fees_cents = total_fee_c
+            est_fees_dollars = total_fee_d
+            net_profit_cents = gross_profit_cents - est_fees_cents
+            net_profit_dollars = cents_to_dollars(net_profit_cents)
+            is_net_profitable = net_profit_cents > 0
+            qualifications.append(
+                f"Fees calculated per leg ({', '.join(leg_explanations)}) using {fee_model.schedule_type.value}: total {est_fees_cents}¢"
+            )
+        elif fee_per_contract_cents is not None:
+            est_fees_cents = total_contracts_filled * fee_per_contract_cents
+            est_fees_dollars = cents_to_dollars(est_fees_cents)
+            net_profit_cents = gross_profit_cents - est_fees_cents
+            net_profit_dollars = cents_to_dollars(net_profit_cents)
+            is_net_profitable = net_profit_cents > 0
 
-        if is_depth_supported and is_gross_profitable:
-            if is_net_profitable:
-                status = STATUS_DEPTH_SUPPORTED_NET_PROFITABLE
-            else:
-                status = STATUS_DEPTH_SUPPORTED_NET_UNPROFITABLE
-                qualifications.append(
-                    "Candidate is depth-supported and gross-positive, but unprofitable after estimated fees."
-                )
+        if is_net_profitable is not None:
+            if is_depth_supported and is_gross_profitable:
+                if is_net_profitable:
+                    status = STATUS_DEPTH_SUPPORTED_NET_PROFITABLE
+                else:
+                    status = STATUS_DEPTH_SUPPORTED_NET_UNPROFITABLE
+                    qualifications.append(
+                        "Candidate is depth-supported and gross-positive, but unprofitable after estimated fees."
+                    )
+        else:
+            if is_depth_supported and is_gross_profitable:
+                status = STATUS_DEPTH_SUPPORTED_GROSS_POSITIVE
+            qualifications.append("Exchange fees not provided; net profitability cannot be established.")
     else:
-        if is_depth_supported and is_gross_profitable:
-            status = STATUS_DEPTH_SUPPORTED_GROSS_POSITIVE
-        qualifications.append("Exchange fees not provided; net profitability cannot be established.")
+        if fee_per_contract_cents is None and fee_model is None:
+            qualifications.append("Exchange fees not provided; net profitability cannot be established.")
 
     return ExecutionPricingResult(
         strategy_type=strategy_type,

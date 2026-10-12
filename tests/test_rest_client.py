@@ -17,6 +17,7 @@ from kalshi_arbitrage import (
     format_http_date,
     parse_http_date,
 )
+from kalshi_arbitrage.rest_client import UrllibGetTransport
 
 
 def market(ticker="KX-1"):
@@ -296,3 +297,35 @@ def test_get_order_book_missing_date_header():
     fake = FakeTransport([response(raw_orderbook, headers={})])
     result = client(fake).get_order_book("KX-1")
     assert result.source_timestamp is None
+
+
+def test_urllib_transport_default_ssl_context_when_env_unset(monkeypatch):
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    transport = UrllibGetTransport()
+    assert transport._ssl_context is None
+
+
+def test_urllib_transport_raises_on_invalid_ssl_cert_file(monkeypatch, tmp_path):
+    missing_file = tmp_path / "nonexistent_ca.crt"
+    monkeypatch.setenv("SSL_CERT_FILE", str(missing_file))
+    with pytest.raises(FileNotFoundError, match="Configured SSL_CERT_FILE does not exist"):
+        UrllibGetTransport()
+
+
+def test_urllib_transport_uses_valid_ssl_cert_file(monkeypatch, tmp_path):
+    # Create a dummy cert file
+    cert_file = tmp_path / "custom_ca.crt"
+    cert_file.write_text("-----BEGIN CERTIFICATE-----\nFAKE\n-----END CERTIFICATE-----\n")
+    monkeypatch.setenv("SSL_CERT_FILE", str(cert_file))
+    # ssl.create_default_context will try to parse it and raise SSLError on invalid PEM bytes,
+    # proving it reads and validates the file
+    import ssl
+    with pytest.raises(ssl.SSLError):
+        UrllibGetTransport()
+
+
+def test_urllib_transport_custom_ssl_context_override():
+    import ssl
+    custom_ctx = ssl.create_default_context()
+    transport = UrllibGetTransport(ssl_context=custom_ctx)
+    assert transport._ssl_context is custom_ctx

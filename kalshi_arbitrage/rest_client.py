@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from email.utils import formatdate, parsedate_to_datetime
 import json
 from math import isfinite
+import os
+import ssl
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, quote
@@ -105,6 +107,20 @@ class HTTPResponse:
 class UrllibGetTransport:
     """GET-only standard-library transport."""
 
+    def __init__(self, ssl_context: Optional[ssl.SSLContext] = None) -> None:
+        if ssl_context is not None:
+            self._ssl_context = ssl_context
+        else:
+            cafile = os.environ.get("SSL_CERT_FILE")
+            if cafile:
+                if not os.path.exists(cafile):
+                    raise FileNotFoundError(
+                        f"Configured SSL_CERT_FILE does not exist: {cafile}"
+                    )
+                self._ssl_context = ssl.create_default_context(cafile=cafile)
+            else:
+                self._ssl_context = None
+
     def get(
         self, url: str, params: Mapping[str, str], timeout_seconds: float
     ) -> HTTPResponse:
@@ -112,7 +128,10 @@ class UrllibGetTransport:
         request_url = f"{url}?{query}" if query else url
         request = Request(request_url, method="GET", headers={"Accept": "application/json"})
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            kwargs = {"timeout": timeout_seconds}
+            if self._ssl_context is not None:
+                kwargs["context"] = self._ssl_context
+            with urlopen(request, **kwargs) as response:
                 headers = dict(response.headers.items()) if hasattr(response, "headers") and response.headers else {}
                 return HTTPResponse(response.status, response.read(), headers=headers)
         except HTTPError as exc:
