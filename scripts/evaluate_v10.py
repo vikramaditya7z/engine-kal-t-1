@@ -30,12 +30,18 @@ from kalshi_arbitrage.async_execution import (
 )
 from kalshi_arbitrage.evaluation import HistoricalDataset
 from kalshi_arbitrage.fee_model import FeeModelConfig, FeeScheduleType
+from kalshi_arbitrage.observer import load_declared_baskets
 from kalshi_arbitrage.paper_risk import PaperRiskConfig
 from kalshi_arbitrage.universe import UniverseFilterConfig
 from kalshi_arbitrage.v10_evaluation import (
     V10EvaluationConfig,
     V10EvaluationReport,
     V10HistoricalStrategyEvaluator,
+)
+from kalshi_arbitrage.v11_collector import _compute_file_sha256
+from kalshi_arbitrage.v13_basket_replay import (
+    HistoricalBasketReplayConfig,
+    HistoricalBasketReplayEngine,
 )
 
 logger = logging.getLogger("v10_evaluator")
@@ -142,6 +148,30 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="File path to save readable Markdown / text evaluation report",
     )
     parser.add_argument(
+        "--basket-file",
+        type=str,
+        default=None,
+        help="Path to JSON file declaring MECE event basket(s) for multi-outcome replay.",
+    )
+    parser.add_argument(
+        "--basket-json",
+        type=str,
+        default=None,
+        help="JSON string declaring MECE event basket(s) for multi-outcome replay.",
+    )
+    parser.add_argument(
+        "--max-leg-skew",
+        type=float,
+        default=5.0,
+        help="Maximum allowable leg timestamp skew in seconds (default: 5.0).",
+    )
+    parser.add_argument(
+        "--basket-output-dir",
+        type=str,
+        default=None,
+        help="Target directory to save structured basket replay artifacts and manifest.",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose debug logging",
@@ -193,6 +223,57 @@ def main(argv: Optional[List[str]] = None) -> int:
         fee_config=fee_cfg,
         enable_latency_decay=True,
     )
+
+    declared_baskets = ()
+    if args.basket_file or args.basket_json:
+        try:
+            declared_baskets = load_declared_baskets(args.basket_file or args.basket_json)
+        except Exception as exc:
+            print(f"Error loading basket configuration: {exc}", file=sys.stderr)
+            return 1
+
+    if declared_baskets:
+        print(f"\nRunning Historical MECE Basket Replay across {len(declared_baskets)} declared basket(s)...")
+        basket_cfg = HistoricalBasketReplayConfig(
+            target_quantity=args.target_quantity,
+            max_leg_timestamp_skew_seconds=args.max_leg_skew,
+            max_stale_seconds=args.max_stale_seconds,
+            fee_config=fee_cfg,
+        )
+        basket_engine = HistoricalBasketReplayEngine(config=basket_cfg)
+        basket_summary = basket_engine.replay(
+            dataset.observations,
+            declared_baskets,
+            source_path=str(file_path),
+            dataset_sha256=_compute_file_sha256(file_path),
+        )
+
+        md_report = basket_summary.summary_markdown()
+        print()
+        print(md_report)
+
+        if args.output_report:
+            out_rep_path = Path(args.output_report)
+            out_rep_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_rep_path, "w", encoding="utf-8") as f:
+                f.write(md_report + "\n")
+            print(f"Saved readable basket evaluation summary report to: {out_rep_path}")
+
+        if args.output_json:
+            out_json_path = Path(args.output_json)
+            out_json_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_json_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(basket_summary.to_dict(), indent=2) + "\n")
+            print(f"Saved structured JSON basket evaluation report to: {out_json_path}")
+
+        if args.basket_output_dir:
+            out_dir = Path(args.basket_output_dir)
+            artifacts = basket_summary.write_artifacts(out_dir)
+            print(f"Saved basket replay artifacts and manifest to: {out_dir}")
+            for name, path in artifacts.items():
+                print(f"  - {name}: {path}")
+
+        return 0
 
     eval_cfg = V10EvaluationConfig(
         initial_cash_cents=args.initial_cash_cents,

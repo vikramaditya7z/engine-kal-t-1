@@ -283,6 +283,76 @@ class KalshiRestClient:
             next_cursor = returned_cursor
         return tuple(markets)
 
+    def list_events(
+        self,
+        *,
+        limit: int = DEFAULT_MARKET_PAGE_SIZE,
+        cursor: Optional[str] = None,
+        status: Optional[str] = "open",
+        series_ticker: Optional[str] = None,
+        with_nested_markets: bool = True,
+        max_events: Optional[int] = None,
+    ) -> Tuple[NormalizedEvent, ...]:
+        """Fetch and normalize events pages from the requested starting cursor.
+
+        If max_events is specified, pagination stops once at least max_events
+        have been retrieved.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise ValueError("limit must be an integer")
+        if not 0 <= limit <= MAX_MARKET_PAGE_SIZE:
+            raise ValueError(f"limit must be between 0 and {MAX_MARKET_PAGE_SIZE}")
+        if max_events is not None:
+            if isinstance(max_events, bool) or not isinstance(max_events, int) or max_events <= 0:
+                raise ValueError("max_events must be a positive integer")
+        if cursor is not None:
+            _identifier(cursor, "cursor")
+        if status is not None:
+            _identifier(status, "status")
+        if series_ticker is not None:
+            _identifier(series_ticker, "series_ticker")
+
+        events = []
+        seen_cursors = set()
+        next_cursor = cursor
+        while True:
+            effective_limit = limit
+            if max_events is not None:
+                remaining = max_events - len(events)
+                if remaining <= 0:
+                    break
+                effective_limit = min(limit, remaining)
+            params: Dict[str, str] = {"limit": str(effective_limit)}
+            if status is not None:
+                params["status"] = status
+            if series_ticker is not None:
+                params["series_ticker"] = series_ticker
+            if with_nested_markets:
+                params["with_nested_markets"] = "true"
+            if next_cursor:
+                params["cursor"] = next_cursor
+
+            payload = self._get_json("/events", params)
+            raw_events = payload.get("events")
+            if not isinstance(raw_events, list):
+                raise KalshiResponseError("response events must be an array")
+            for raw_event in raw_events:
+                try:
+                    events.append(normalize_event({"event": _object(raw_event, "event")}))
+                    if max_events is not None and len(events) >= max_events:
+                        return tuple(events[:max_events])
+                except MarketDataInputError:
+                    raise
+            returned_cursor = payload.get("cursor")
+            if returned_cursor in (None, ""):
+                break
+            if not isinstance(returned_cursor, str):
+                raise KalshiResponseError("response cursor must be a string or null")
+            if returned_cursor in seen_cursors or returned_cursor == next_cursor:
+                raise KalshiPaginationError("event pagination cursor repeated")
+            seen_cursors.add(returned_cursor)
+            next_cursor = returned_cursor
+        return tuple(events)
 
     def get_market(self, ticker: str) -> NormalizedMarket:
         ticker = _identifier(ticker, "ticker")

@@ -21,7 +21,9 @@ Governing Principles:
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 import logging
+from pathlib import Path
 import time
 from typing import (
     Any,
@@ -78,6 +80,7 @@ STATUS_REJECTED_STALE = "REJECTED_STALE"
 STATUS_REJECTED_MISSING_TIMESTAMP = "REJECTED_MISSING_TIMESTAMP"
 STATUS_REJECTED_LEG_SKEW = "REJECTED_LEG_SKEW"
 STATUS_REJECTED_INSUFFICIENT_DEPTH = "REJECTED_INSUFFICIENT_DEPTH"
+STATUS_REJECTED_INSUFFICIENT_QUANTITY = "REJECTED_INSUFFICIENT_QUANTITY"
 STATUS_REJECTED_UNPROFITABLE_FEES = "REJECTED_UNPROFITABLE_FEES"
 STATUS_REJECTED_NO_GROSS_EDGE = "REJECTED_NO_GROSS_EDGE"
 STATUS_REJECTED_MISSING_MARKET = "REJECTED_MISSING_MARKET"
@@ -101,31 +104,198 @@ class DeclaredMeceBasket:
     outcomes: Tuple[str, ...]
     market_outcome_map: Mapping[str, str]  # ticker -> outcome
     basket_side: str = YES
+    basket_id: Optional[str] = None
+    notes: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.event_ticker, str) or not self.event_ticker:
+        if not isinstance(self.event_ticker, str) or not self.event_ticker.strip():
             raise ObserverError("event_ticker must be a non-empty string")
         if not isinstance(self.outcomes, tuple) or len(self.outcomes) < 2:
             raise ObserverError("outcomes must be a tuple with at least 2 outcomes")
+        for o in self.outcomes:
+            if not isinstance(o, str) or not o.strip():
+                raise ObserverError(f"each outcome must be a non-empty string, got {o!r}")
         if len(set(self.outcomes)) != len(self.outcomes):
             raise ObserverError("outcomes must contain unique strings")
         if not isinstance(self.market_outcome_map, Mapping):
             raise ObserverError("market_outcome_map must be a mapping")
         if self.basket_side not in (YES, NO):
             raise ObserverError(f"basket_side must be {YES!r} or {NO!r}")
+        if self.basket_id is not None:
+            if not isinstance(self.basket_id, str) or not self.basket_id.strip():
+                raise ObserverError("basket_id must be a non-empty string")
+        if self.notes is not None and not isinstance(self.notes, str):
+            raise ObserverError("notes must be a string")
         for ticker, outcome in self.market_outcome_map.items():
-            if not isinstance(ticker, str) or not ticker:
+            if not isinstance(ticker, str) or not ticker.strip():
                 raise ObserverError("market ticker must be a non-empty string")
+            if not isinstance(outcome, str) or not outcome.strip():
+                raise ObserverError("outcome must be a non-empty string")
             if outcome not in self.outcomes:
                 raise ObserverError(f"mapped outcome {outcome!r} not in declared outcomes")
         if len(self.market_outcome_map) != len(self.outcomes):
             raise ObserverError("market_outcome_map must map exactly all declared outcomes")
+        if set(self.market_outcome_map.values()) != set(self.outcomes):
+            raise ObserverError("market_outcome_map must map each declared outcome exactly once")
 
     @property
     def ordered_tickers(self) -> Tuple[str, ...]:
         """Market tickers ordered strictly by declared outcomes order."""
         outcome_to_ticker = {outcome: ticker for ticker, outcome in self.market_outcome_map.items()}
         return tuple(outcome_to_ticker[o] for o in self.outcomes)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize declared basket to dictionary."""
+        d = {
+            "event_ticker": self.event_ticker,
+            "outcomes": list(self.outcomes),
+            "market_outcome_map": dict(self.market_outcome_map),
+            "basket_side": self.basket_side,
+        }
+        if self.basket_id is not None:
+            d["basket_id"] = self.basket_id
+        if self.notes is not None:
+            d["notes"] = self.notes
+        return d
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "DeclaredMeceBasket":
+        """Deserialize declared basket from mapping with strict validation."""
+        if not isinstance(data, Mapping):
+            raise ObserverError("basket configuration must be a mapping/object")
+
+        for req in ("event_ticker", "outcomes", "market_outcome_map"):
+            if req not in data:
+                raise ObserverError(f"missing required basket field: {req!r}")
+
+        event_ticker = data["event_ticker"]
+        if not isinstance(event_ticker, str) or not event_ticker.strip():
+            raise ObserverError("event_ticker must be a non-empty string")
+
+        outcomes_raw = data["outcomes"]
+        if not isinstance(outcomes_raw, (list, tuple)):
+            raise ObserverError("outcomes must be a sequence of outcome names")
+        for idx, o in enumerate(outcomes_raw):
+            if not isinstance(o, str) or not o.strip():
+                raise ObserverError(f"outcome at index {idx} must be a non-empty string, got {o!r}")
+
+        market_map = data["market_outcome_map"]
+        if not isinstance(market_map, Mapping):
+            raise ObserverError("market_outcome_map must be a mapping of ticker -> outcome")
+        for k, v in market_map.items():
+            if not isinstance(k, str) or not k.strip():
+                raise ObserverError(f"market ticker key {k!r} must be a non-empty string")
+            if not isinstance(v, str) or not v.strip():
+                raise ObserverError(f"mapped outcome value {v!r} must be a non-empty string")
+
+        basket_side_raw = data.get("basket_side", YES)
+        if not isinstance(basket_side_raw, str):
+            raise ObserverError("basket_side must be a string")
+        basket_side = basket_side_raw.strip().upper()
+        if basket_side not in (YES, NO):
+            raise ObserverError(f"basket_side must be {YES!r} or {NO!r}, got {basket_side_raw!r}")
+
+        basket_id = data.get("basket_id")
+        if basket_id is not None and (not isinstance(basket_id, str) or not basket_id.strip()):
+            raise ObserverError("basket_id must be a non-empty string")
+
+        notes = data.get("notes")
+        if notes is not None and not isinstance(notes, str):
+            raise ObserverError("notes must be a string")
+
+        return cls(
+            event_ticker=event_ticker,
+            outcomes=tuple(outcomes_raw),
+            market_outcome_map=dict(market_map),
+            basket_side=basket_side,
+            basket_id=basket_id,
+            notes=notes,
+        )
+
+
+def load_declared_baskets(
+    source: Union[str, Path, Mapping[str, Any], Sequence[Any]]
+) -> Tuple[DeclaredMeceBasket, ...]:
+    """Load and strictly validate one or more DeclaredMeceBasket configurations.
+
+    Accepts:
+    - Path to a JSON file (or str representing an existing file path).
+    - Raw JSON string.
+    - Parsed dictionary (single basket or {"baskets": [...]}).
+    - Parsed list of basket dictionaries.
+
+    Raises ObserverError if data is malformed, missing required fields, or invalid.
+    """
+    if isinstance(source, (str, Path)):
+        is_file = False
+        if isinstance(source, Path):
+            is_file = source.exists() and source.is_file()
+            p = source
+        else:
+            stripped = source.strip()
+            if not stripped.startswith(("{", "[")) and len(source) < 260:
+                try:
+                    p = Path(source)
+                    is_file = p.exists() and p.is_file()
+                except OSError:
+                    is_file = False
+            else:
+                p = Path("non_existent")
+
+        if is_file:
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    parsed = json.load(f)
+            except Exception as exc:
+                raise ObserverError(f"Failed to read basket configuration file {p}: {exc}") from exc
+        else:
+            if isinstance(source, Path):
+                raise ObserverError(f"Basket configuration file not found: {source}")
+            try:
+                parsed = json.loads(source)
+            except Exception as exc:
+                raise ObserverError(f"Invalid basket configuration JSON: {exc}") from exc
+    else:
+        parsed = source
+
+    if isinstance(parsed, Mapping):
+        if "baskets" in parsed:
+            if not isinstance(parsed["baskets"], (list, tuple)):
+                raise ObserverError("'baskets' key must be a list of basket configurations")
+            items = list(parsed["baskets"])
+        else:
+            items = [parsed]
+    elif isinstance(parsed, (list, tuple)):
+        items = list(parsed)
+    else:
+        raise ObserverError("Basket configuration must be a JSON object or array")
+
+    if not items:
+        return ()
+
+    baskets = []
+    seen_basket_ids = set()
+    seen_event_sides = set()
+    for idx, item in enumerate(items):
+        if not isinstance(item, Mapping):
+            raise ObserverError(f"Basket at index {idx} must be a mapping/object")
+        basket = DeclaredMeceBasket.from_dict(item)
+
+        if basket.basket_id is not None:
+            if basket.basket_id in seen_basket_ids:
+                raise ObserverError(f"Duplicate basket_id {basket.basket_id!r} at index {idx}")
+            seen_basket_ids.add(basket.basket_id)
+
+        event_side = (basket.event_ticker, basket.basket_side)
+        if event_side in seen_event_sides:
+            raise ObserverError(
+                f"Duplicate basket definition for event {basket.event_ticker!r} and side {basket.basket_side!r} at index {idx}"
+            )
+        seen_event_sides.add(event_side)
+
+        baskets.append(basket)
+
+    return tuple(baskets)
 
 
 @dataclass(frozen=True)
@@ -196,6 +366,13 @@ class MarketObservation:
     is_stale: bool
     staleness_reason: Optional[str] = None
     error_message: Optional[str] = None
+    source_transport: str = "REST"
+    stream_seq: Optional[int] = None
+    local_receive_time: Optional[datetime] = None
+    sync_state: str = "SYNCHRONIZED"
+    data_quality_flags: Tuple[str, ...] = ()
+    session_id: Optional[str] = None
+    config_fingerprint: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -209,7 +386,7 @@ class EvaluatedOpportunity:
     source_timestamps: Mapping[str, Optional[datetime]]
     leg_timestamp_skew_seconds: float
     market_tickers: Tuple[str, ...]
-    candidate_opportunity: ArbitrageOpportunity
+    candidate_opportunity: Optional[ArbitrageOpportunity]
     pricing_result: Optional[ExecutionPricingResult]
     status: str
     rejection_reason: Optional[str]

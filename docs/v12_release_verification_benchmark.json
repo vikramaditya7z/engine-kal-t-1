@@ -1,0 +1,87 @@
+{
+  "metadata": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "python_version": "3.9.6",
+    "processor": "arm64",
+    "timestamp": "2026-10-12T13:46:28.507023+00:00"
+  },
+  "real_evidence_benchmarks": [
+    {
+      "name": "V5 Initial Public Trial",
+      "path": "data/v5_trial/observations.jsonl",
+      "observations_count": 21,
+      "file_size_bytes": 66556,
+      "elapsed_seconds": 0.0051,
+      "throughput_obs_per_sec": 4136.3,
+      "mean_latency_us": 241.8,
+      "executive_verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "V11 Live Bounded Collection",
+      "path": "evidence_v11_trial/observations.jsonl",
+      "observations_count": 8,
+      "file_size_bytes": 18568,
+      "elapsed_seconds": 0.0019,
+      "throughput_obs_per_sec": 4108.9,
+      "mean_latency_us": 243.4,
+      "executive_verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "V11 Prospective Paper Trial",
+      "path": "evidence_v11_prospective_trial/observations.jsonl",
+      "observations_count": 10,
+      "file_size_bytes": 23450,
+      "elapsed_seconds": 0.0024,
+      "throughput_obs_per_sec": 4174.1,
+      "mean_latency_us": 239.6,
+      "executive_verdict": "INCONCLUSIVE"
+    }
+  ],
+  "synthetic_scaling_benchmarks": [
+    {
+      "observation_count": 100,
+      "elapsed_seconds": 0.002,
+      "throughput_obs_per_sec": 49779.1,
+      "mean_latency_us": 20.1,
+      "peak_memory_kb": 48.0,
+      "memory_per_obs_bytes": 491.1
+    },
+    {
+      "observation_count": 500,
+      "elapsed_seconds": 0.0048,
+      "throughput_obs_per_sec": 104676.4,
+      "mean_latency_us": 9.6,
+      "peak_memory_kb": 279.0,
+      "memory_per_obs_bytes": 571.3
+    },
+    {
+      "observation_count": 1000,
+      "elapsed_seconds": 0.0088,
+      "throughput_obs_per_sec": 113121.1,
+      "mean_latency_us": 8.8,
+      "peak_memory_kb": 576.8,
+      "memory_per_obs_bytes": 590.6
+    },
+    {
+      "observation_count": 5000,
+      "elapsed_seconds": 0.0429,
+      "throughput_obs_per_sec": 116573.0,
+      "mean_latency_us": 8.6,
+      "peak_memory_kb": 2988.5,
+      "memory_per_obs_bytes": 612.0
+    }
+  ],
+  "microstructure_benchmarks": {
+    "fee_calc_iterations": 20000,
+    "fee_calc_elapsed_s": 0.1135,
+    "fee_calc_ops_per_sec": 176171.0,
+    "async_sim_iterations": 2000,
+    "async_sim_elapsed_s": 0.0811,
+    "async_sim_trades_per_sec": 24651.9
+  },
+  "cryptographic_hashing": {
+    "sample_size_mb": 5.0,
+    "elapsed_seconds": 0.0015,
+    "sha256_throughput_mb_per_sec": 3269.0
+  }
+}

@@ -43,8 +43,11 @@ import uuid
 from .arbitrage import (
     ArbitrageOpportunity,
     OPPORTUNITY_BINARY_PARITY,
+    OPPORTUNITY_MECE_BASKET_LONG_NO,
+    OPPORTUNITY_MECE_BASKET_LONG_YES,
     dollars_to_cents,
     evaluate_market_parity,
+    evaluate_mece_markets,
 )
 from .async_execution import (
     AsyncMultiLegTrade,
@@ -66,6 +69,7 @@ from .execution import (
     ExecutionPricingResult,
     derive_ask_levels,
     evaluate_binary_parity_execution,
+    evaluate_mece_basket_execution,
 )
 from .fee_model import FeeModelConfig, FeeScheduleType
 from .ledger import LedgerEntry, PaperPortfolio, ReconciliationResult
@@ -85,16 +89,23 @@ from .market_data_provider import (
     validate_order_book_freshness,
 )
 from .observer import (
+    DeclaredMeceBasket,
     EvaluatedOpportunity,
     MarketObservation,
+    ObserverError,
     STATUS_QUALIFIED,
     STATUS_REJECTED_INSUFFICIENT_DEPTH,
+    STATUS_REJECTED_LEG_SKEW,
+    STATUS_REJECTED_MISSING_MARKET,
+    STATUS_REJECTED_MISSING_TIMESTAMP,
     STATUS_REJECTED_NO_GROSS_EDGE,
     STATUS_REJECTED_RISK,
     STATUS_REJECTED_STALE,
     STATUS_REJECTED_UNPROFITABLE_FEES,
+    load_declared_baskets,
 )
 from .paper_risk import PaperRiskConfig, PaperRiskGate
+from .portfolio import Event
 from .rest_client import KalshiClientError, KalshiRestClient
 from .universe import (
     LiquidUniverseSelector,
@@ -184,7 +195,9 @@ class V11EvidenceManifest:
     unique_tickers: Tuple[str, ...]
     observations_sha256: Optional[str] = None
     diagnostics_sha256: Optional[str] = None
+    opportunities_sha256: Optional[str] = None
     manifest_sha256: Optional[str] = None
+    basket_evaluations_count: int = 0
     collector_config: Dict[str, Any] = field(default_factory=dict)
     system_environment: Dict[str, Any] = field(default_factory=dict)
 
@@ -202,7 +215,9 @@ class V11EvidenceManifest:
             "unique_tickers": list(self.unique_tickers),
             "observations_sha256": self.observations_sha256,
             "diagnostics_sha256": self.diagnostics_sha256,
+            "opportunities_sha256": self.opportunities_sha256,
             "manifest_sha256": self.manifest_sha256,
+            "basket_evaluations_count": self.basket_evaluations_count,
             "collector_config": self.collector_config,
             "system_environment": self.system_environment,
         }
@@ -230,7 +245,9 @@ class V11EvidenceManifest:
             unique_tickers=tuple(d.get("unique_tickers", ())),
             observations_sha256=d.get("observations_sha256"),
             diagnostics_sha256=d.get("diagnostics_sha256"),
+            opportunities_sha256=d.get("opportunities_sha256"),
             manifest_sha256=d.get("manifest_sha256"),
+            basket_evaluations_count=int(d.get("basket_evaluations_count", 0)),
             collector_config=dict(d.get("collector_config", {})),
             system_environment=dict(d.get("system_environment", {})),
         )
@@ -258,6 +275,8 @@ class V11CollectorConfig:
     session_name: str = "v11_collection"
     output_dir: Union[str, Path] = "evidence_v11"
     target_tickers: Optional[Tuple[str, ...]] = None
+    declared_baskets: Tuple[DeclaredMeceBasket, ...] = ()
+    max_leg_timestamp_skew_seconds: float = 5.0
     max_markets_per_cycle: int = 20
     poll_interval_seconds: float = 2.0
     min_request_interval_seconds: float = 0.10  # Max 10 requests/s rate limit
@@ -282,6 +301,13 @@ class V11CollectorConfig:
             raise ValueError("min_request_interval_seconds must be non-negative")
         if self.max_stale_seconds <= 0:
             raise ValueError("max_stale_seconds must be positive")
+        if self.max_leg_timestamp_skew_seconds <= 0:
+            raise ValueError("max_leg_timestamp_skew_seconds must be positive")
+        if not isinstance(self.declared_baskets, tuple):
+            raise ValueError("declared_baskets must be a tuple")
+        for b in self.declared_baskets:
+            if not isinstance(b, DeclaredMeceBasket):
+                raise ValueError("all items in declared_baskets must be DeclaredMeceBasket instances")
         if self.max_cycles is not None and self.max_cycles <= 0:
             raise ValueError("max_cycles must be positive if set")
         if self.max_duration_seconds is not None and self.max_duration_seconds <= 0:
@@ -587,6 +613,18 @@ class V11ProspectiveEvaluator:
         self.legged_out = 0
         self.completed_arbs = 0
 
+        # Basket funnel counters
+        self.baskets_evaluated = 0
+        self.basket_candidates_detected = 0
+        self.basket_rej_missing_market = 0
+        self.basket_rej_stale = 0
+        self.basket_rej_leg_skew = 0
+        self.basket_rej_insufficient_depth = 0
+        self.basket_rej_no_gross_edge = 0
+        self.basket_rej_unprofitable_fees = 0
+        self.basket_rej_risk = 0
+        self.basket_qualified = 0
+
     def process_observation(self, obs: MarketObservation) -> Optional[EvaluatedOpportunity]:
         """Prospective evaluation step for a single incoming observation."""
         if obs.observation_id in self._processed_obs_ids:
@@ -728,6 +766,331 @@ class V11ProspectiveEvaluator:
         self._evaluated_opportunities.append(eval_opp)
         return eval_opp
 
+    def process_basket(
+        self,
+        basket: DeclaredMeceBasket,
+        observations: Mapping[str, MarketObservation],
+        cycle_timestamp: Optional[datetime] = None,
+    ) -> Optional[EvaluatedOpportunity]:
+        """Prospective evaluation step for an explicitly declared MECE event basket."""
+        now = cycle_timestamp or datetime.now(timezone.utc)
+        self.baskets_evaluated += 1
+        opp_id = f"v11-mece-{basket.event_ticker}-{int(now.timestamp())}-{uuid.uuid4().hex[:6]}"
+        strat_type = (
+            OPPORTUNITY_MECE_BASKET_LONG_YES
+            if basket.basket_side == YES
+            else OPPORTUNITY_MECE_BASKET_LONG_NO
+        )
+
+        # 1. Completeness check: All declared market tickers must be present in cycle observations
+        missing_tickers = [t for t in basket.ordered_tickers if t not in observations]
+        if missing_tickers:
+            self.basket_rej_missing_market += 1
+            eval_opp = EvaluatedOpportunity(
+                observation_id=f"basket-{basket.event_ticker}-{int(now.timestamp())}",
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps={t: observations[t].source_timestamp for t in basket.ordered_tickers if t in observations},
+                leg_timestamp_skew_seconds=0.0,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=None,
+                pricing_result=None,
+                status=STATUS_REJECTED_MISSING_MARKET,
+                rejection_reason=f"Incomplete cycle snapshot: missing leg(s) {missing_tickers}",
+                fee_per_contract_cents=None,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        basket_obs = [observations[t] for t in basket.ordered_tickers]
+        failed_obs = [o for o in basket_obs if not o.is_success or o.market is None or o.order_book is None]
+        if failed_obs:
+            self.basket_rej_missing_market += 1
+            eval_opp = EvaluatedOpportunity(
+                observation_id=",".join(o.observation_id for o in basket_obs),
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps={o.ticker: o.source_timestamp for o in basket_obs},
+                leg_timestamp_skew_seconds=0.0,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=None,
+                pricing_result=None,
+                status=STATUS_REJECTED_MISSING_MARKET,
+                rejection_reason=f"Failed observation on leg(s): {[o.ticker for o in failed_obs]}",
+                fee_per_contract_cents=None,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        source_ts_map = {o.ticker: o.source_timestamp for o in basket_obs}
+
+        # 2. Freshness check: None of the legs may be marked stale
+        stale_legs = [o for o in basket_obs if o.is_stale]
+        if stale_legs:
+            self.basket_rej_stale += 1
+            eval_opp = EvaluatedOpportunity(
+                observation_id=",".join(o.observation_id for o in basket_obs),
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps=source_ts_map,
+                leg_timestamp_skew_seconds=0.0,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=None,
+                pricing_result=None,
+                status=STATUS_REJECTED_STALE,
+                rejection_reason=f"Stale leg(s): {'; '.join(f'{o.ticker}: {o.staleness_reason}' for o in stale_legs)}",
+                fee_per_contract_cents=None,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        # 3. Timestamp skew check
+        missing_ts_legs = [o.ticker for o in basket_obs if o.source_timestamp is None]
+        if missing_ts_legs:
+            self.basket_rej_stale += 1
+            eval_opp = EvaluatedOpportunity(
+                observation_id=",".join(o.observation_id for o in basket_obs),
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps=source_ts_map,
+                leg_timestamp_skew_seconds=0.0,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=None,
+                pricing_result=None,
+                status=STATUS_REJECTED_MISSING_TIMESTAMP,
+                rejection_reason=f"Legs missing source_timestamp: {missing_ts_legs}",
+                fee_per_contract_cents=None,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        ts_values = [o.source_timestamp.timestamp() for o in basket_obs if o.source_timestamp]
+        skew_seconds = max(ts_values) - min(ts_values)
+        if skew_seconds > self.config.max_leg_timestamp_skew_seconds:
+            self.basket_rej_leg_skew += 1
+            eval_opp = EvaluatedOpportunity(
+                observation_id=",".join(o.observation_id for o in basket_obs),
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps=source_ts_map,
+                leg_timestamp_skew_seconds=skew_seconds,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=None,
+                pricing_result=None,
+                status=STATUS_REJECTED_LEG_SKEW,
+                rejection_reason=f"Excessive leg timestamp skew: {skew_seconds:.2f}s > max {self.config.max_leg_timestamp_skew_seconds:.2f}s",
+                fee_per_contract_cents=None,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        # 4. Construct Event and candidate detection (V2)
+        event = Event(
+            identifier=basket.event_ticker,
+            outcomes=basket.outcomes,
+            relationship_established=True,
+        )
+        markets = [o.market for o in basket_obs]
+        books_by_outcome = {
+            basket.market_outcome_map[o.ticker]: o.order_book for o in basket_obs
+        }
+
+        try:
+            candidate = evaluate_mece_markets(
+                event=event,
+                markets=markets,
+                market_outcome_map=basket.market_outcome_map,
+                basket_side=basket.basket_side,
+                quantity=self.config.target_quantity,
+            )
+        except Exception as exc:
+            logger.debug(f"Candidate evaluation failed for basket {basket.event_ticker}: {exc}")
+            return None
+
+        # 5. V3 Depth traversal and fee-adjusted execution pricing
+        pricing = evaluate_mece_basket_execution(
+            event=event,
+            books_by_outcome=books_by_outcome,
+            basket_side=basket.basket_side,
+            requested_quantity=self.config.target_quantity,
+            fee_model=self.config.fee_config,
+            series_ticker=basket.event_ticker,
+        )
+
+        obs_id_combined = ",".join(o.observation_id for o in basket_obs)
+
+        # 6. Qualification & Rejection classification
+        if pricing.supported_quantity <= 0:
+            self.basket_rej_insufficient_depth += 1
+            status = STATUS_REJECTED_INSUFFICIENT_DEPTH
+            reason = pricing.rejection_reason or "Order books have insufficient depth for common basket execution"
+            eval_opp = EvaluatedOpportunity(
+                observation_id=obs_id_combined,
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps=source_ts_map,
+                leg_timestamp_skew_seconds=skew_seconds,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=candidate,
+                pricing_result=pricing,
+                status=status,
+                rejection_reason=reason,
+                fee_per_contract_cents=pricing.estimated_fees_cents,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        if not pricing.is_gross_profitable:
+            self.basket_rej_no_gross_edge += 1
+            status = STATUS_REJECTED_NO_GROSS_EDGE
+            reason = pricing.rejection_reason or f"No gross edge: total cost ({pricing.total_cost_cents}¢) exceeds guaranteed payout ({pricing.guaranteed_payout_cents}¢)"
+            eval_opp = EvaluatedOpportunity(
+                observation_id=obs_id_combined,
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps=source_ts_map,
+                leg_timestamp_skew_seconds=skew_seconds,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=candidate,
+                pricing_result=pricing,
+                status=status,
+                rejection_reason=reason,
+                fee_per_contract_cents=pricing.estimated_fees_cents,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        if pricing.is_net_profitable is False:
+            self.basket_rej_unprofitable_fees += 1
+            status = STATUS_REJECTED_UNPROFITABLE_FEES
+            reason = pricing.rejection_reason or f"Unprofitable after estimated fees: net edge {pricing.net_profit_cents}¢"
+            eval_opp = EvaluatedOpportunity(
+                observation_id=obs_id_combined,
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps=source_ts_map,
+                leg_timestamp_skew_seconds=skew_seconds,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=candidate,
+                pricing_result=pricing,
+                status=status,
+                rejection_reason=reason,
+                fee_per_contract_cents=pricing.estimated_fees_cents,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        # 7. Candidate is gross and net profitable! Pre-trade risk check
+        self.basket_candidates_detected += 1
+        total_req_cost = pricing.total_cost_cents + (pricing.estimated_fees_cents or 0)
+        if (
+            total_req_cost > self.portfolio.available_cash_cents
+            or total_req_cost > self.config.risk_config.max_cost_per_trade_cents
+        ):
+            self.basket_rej_risk += 1
+            eval_opp = EvaluatedOpportunity(
+                observation_id=obs_id_combined,
+                opportunity_id=opp_id,
+                strategy_type=strat_type,
+                observed_at=now,
+                source_timestamps=source_ts_map,
+                leg_timestamp_skew_seconds=skew_seconds,
+                market_tickers=basket.ordered_tickers,
+                candidate_opportunity=candidate,
+                pricing_result=pricing,
+                status=STATUS_REJECTED_RISK,
+                rejection_reason="Pre-trade risk limit or available cash reservation exceeded",
+                fee_per_contract_cents=pricing.estimated_fees_cents,
+                is_qualified=False,
+            )
+            self._evaluated_opportunities.append(eval_opp)
+            return eval_opp
+
+        # 8. Simulate execution
+        self.approved_for_execution += 1
+        self.execution_attempts += 1
+        legs_specs = [
+            (f"{t}:{basket.basket_side}", t, basket.basket_side)
+            for t in basket.ordered_tickers
+        ]
+        depth_by_leg = {}
+        bids_by_leg = {}
+        for t in basket.ordered_tickers:
+            book = observations[t].order_book
+            asks = derive_ask_levels(book, basket.basket_side)
+            cid = f"{t}:{basket.basket_side}"
+            depth_by_leg[cid] = [(lvl.price_cents, int(lvl.quantity)) for lvl in asks]
+            bids = book.yes_bids if basket.basket_side == YES else book.no_bids
+            bids_by_leg[cid] = [(dollars_to_cents(lvl.price_dollars), int(lvl.quantity)) for lvl in bids]
+
+        trade = self.simulator.simulate_execution(
+            trade_id=f"v11-trade-basket-{basket.event_ticker}-{int(now.timestamp())}",
+            strategy_type=strat_type,
+            target_quantity=pricing.supported_quantity,
+            legs_specs=legs_specs,
+            available_depth_by_leg=depth_by_leg,
+            counterparty_bids_by_leg=bids_by_leg,
+            start_time=now,
+        )
+
+        apply_async_trade_to_portfolio(self.portfolio, trade, timestamp=now.isoformat())
+        self._trades.append(trade)
+
+        if trade.state == MultiLegLifecycleState.FILLED:
+            self.fully_filled += 1
+            self.completed_arbs += 1
+        elif trade.state == MultiLegLifecycleState.PARTIALLY_FILLED:
+            self.partially_filled += 1
+        elif trade.state in (
+            MultiLegLifecycleState.LEGGED_OUT,
+            MultiLegLifecycleState.UNWINDING,
+            MultiLegLifecycleState.CLOSED,
+        ):
+            self.legged_out += 1
+
+        rec = self.portfolio.reconcile()
+        if not rec.is_reconciled:
+            err = f"Accounting invariant broken in prospective basket evaluation: {rec.discrepancies}"
+            logger.critical(err)
+            raise RuntimeError(err)
+
+        self.basket_qualified += 1
+        eval_opp = EvaluatedOpportunity(
+            observation_id=obs_id_combined,
+            opportunity_id=opp_id,
+            strategy_type=strat_type,
+            observed_at=now,
+            source_timestamps=source_ts_map,
+            leg_timestamp_skew_seconds=skew_seconds,
+            market_tickers=basket.ordered_tickers,
+            candidate_opportunity=candidate,
+            pricing_result=pricing,
+            status=STATUS_QUALIFIED,
+            rejection_reason=None,
+            fee_per_contract_cents=pricing.estimated_fees_cents,
+            is_qualified=True,
+            is_recurrent=False,
+            paper_trade_id=trade.trade_id,
+        )
+        self._evaluated_opportunities.append(eval_opp)
+        return eval_opp
+
     def get_financial_summary(self) -> Dict[str, Any]:
         """Summary of current financial metrics."""
         rec = self.portfolio.reconcile()
@@ -747,6 +1110,15 @@ class V11ProspectiveEvaluator:
             "legged_out": self.legged_out,
             "is_ledger_reconciled": rec.is_reconciled,
             "discrepancies": rec.discrepancies,
+            "baskets_evaluated": self.baskets_evaluated,
+            "basket_qualified": self.basket_qualified,
+            "basket_rej_missing_market": self.basket_rej_missing_market,
+            "basket_rej_stale": self.basket_rej_stale,
+            "basket_rej_leg_skew": self.basket_rej_leg_skew,
+            "basket_rej_insufficient_depth": self.basket_rej_insufficient_depth,
+            "basket_rej_no_gross_edge": self.basket_rej_no_gross_edge,
+            "basket_rej_unprofitable_fees": self.basket_rej_unprofitable_fees,
+            "basket_rej_risk": self.basket_rej_risk,
         }
 
 
@@ -788,6 +1160,7 @@ class V11MarketEvidenceCollector:
         self._total_requests = 0
         self._successful_observations = 0
         self._diagnostic_events_count = 0
+        self._basket_evaluations_count = 0
         self._seen_tickers: Set[str] = set()
         self._last_request_time: float = 0.0
 
@@ -933,8 +1306,14 @@ class V11MarketEvidenceCollector:
 
         # 1. Discover or select markets
         markets: List[NormalizedMarket] = []
-        if self.config.target_tickers:
-            for t in self.config.target_tickers:
+        tickers_to_poll = list(self.config.target_tickers or ())
+        for b in self.config.declared_baskets:
+            for t in b.ordered_tickers:
+                if t not in tickers_to_poll:
+                    tickers_to_poll.append(t)
+
+        if tickers_to_poll:
+            for t in tickers_to_poll:
                 try:
                     m = self._execute_bounded_request(
                         "get_market", self.data_provider.get_market, t, ticker=t
@@ -955,6 +1334,7 @@ class V11MarketEvidenceCollector:
                 return 0
 
         # 2. Poll order books for each market
+        cycle_observations: Dict[str, MarketObservation] = {}
         for market in markets:
             if self._stop_requested:
                 break
@@ -1007,6 +1387,9 @@ class V11MarketEvidenceCollector:
                     staleness_reason=staleness_reason,
                 )
 
+                # Track in cycle observations
+                cycle_observations[ticker] = obs
+
                 # Persist observation atomically
                 if obs.observation_id not in self._persisted_obs_ids:
                     self._append_record(self.observations_path, observation_to_dict(obs))
@@ -1014,7 +1397,7 @@ class V11MarketEvidenceCollector:
                     self._successful_observations += 1
                     cycle_obs_count += 1
 
-                # Prospective evaluation hook
+                # Prospective evaluation hook for single-market parity
                 if self.prospective_evaluator:
                     eval_opp = self.prospective_evaluator.process_observation(obs)
                     if eval_opp:
@@ -1022,6 +1405,16 @@ class V11MarketEvidenceCollector:
 
             except Exception as exc:
                 logger.debug(f"Failed observation for {ticker}: {exc}")
+
+        # 3. Prospective evaluation hook for declared MECE baskets
+        if self.config.declared_baskets and self.prospective_evaluator:
+            for basket in self.config.declared_baskets:
+                basket_opp = self.prospective_evaluator.process_basket(
+                    basket, cycle_observations, cycle_timestamp=cycle_start
+                )
+                if basket_opp:
+                    self._append_record(self.opportunities_path, opportunity_to_dict(basket_opp))
+                    self._basket_evaluations_count += 1
 
         return cycle_obs_count
 
@@ -1104,6 +1497,7 @@ class V11MarketEvidenceCollector:
         """Write cryptographic dataset manifest."""
         obs_hash = _compute_file_sha256(self.observations_path)
         diag_hash = _compute_file_sha256(self.diagnostics_path)
+        opps_hash = _compute_file_sha256(self.opportunities_path)
 
         cfg_dict = {
             "session_name": self.config.session_name,
@@ -1115,6 +1509,8 @@ class V11MarketEvidenceCollector:
             "max_duration_seconds": self.config.max_duration_seconds,
             "max_observations": self.config.max_observations,
             "enable_prospective_evaluation": self.config.enable_prospective_evaluation,
+            "declared_baskets_count": len(self.config.declared_baskets),
+            "max_leg_timestamp_skew_seconds": self.config.max_leg_timestamp_skew_seconds,
         }
 
         env_dict = {
@@ -1135,6 +1531,9 @@ class V11MarketEvidenceCollector:
             unique_tickers=tuple(sorted(self._seen_tickers)),
             observations_sha256=obs_hash,
             diagnostics_sha256=diag_hash,
+            opportunities_sha256=opps_hash,
+            manifest_sha256=None,
+            basket_evaluations_count=self._basket_evaluations_count,
             collector_config=cfg_dict,
             system_environment=env_dict,
         )

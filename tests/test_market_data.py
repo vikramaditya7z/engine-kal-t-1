@@ -13,6 +13,7 @@ from kalshi_arbitrage import (
     parse_price_dollars,
     parse_quantity,
 )
+from kalshi_arbitrage.market_data import _optional_text, _required_text
 
 
 def market_payload():
@@ -285,3 +286,67 @@ def test_order_book_source_timestamp_validation():
             no_bids=(OrderBookLevel(price_dollars=Decimal("0.20"), quantity=Decimal("1")),),
             source_timestamp=naive_ts,
         )
+
+
+def test_optional_text_normalization():
+    # None returns None
+    assert _optional_text(None, "opt_field") is None
+    # Empty string normalizes to None
+    assert _optional_text("", "opt_field") is None
+    # Whitespace-only string normalizes to None
+    assert _optional_text("   ", "opt_field") is None
+    assert _optional_text("\t\n ", "opt_field") is None
+    # Valid non-empty string is preserved
+    assert _optional_text("valid_value", "opt_field") == "valid_value"
+    assert _optional_text("  trimmed? No, exact  ", "opt_field") == "  trimmed? No, exact  "
+    # Invalid non-string types must fail closed
+    with pytest.raises(MarketDataInputError, match="must be a non-empty string"):
+        _optional_text(123, "opt_field")
+    with pytest.raises(MarketDataInputError, match="must be a non-empty string"):
+        _optional_text(True, "opt_field")
+
+
+def test_required_text_validation():
+    # Valid non-empty string is returned
+    assert _required_text("valid_req", "req_field") == "valid_req"
+    # None, empty string, and whitespace-only must be rejected
+    with pytest.raises(MarketDataInputError, match="must be a non-empty string"):
+        _required_text(None, "req_field")
+    with pytest.raises(MarketDataInputError, match="must be a non-empty string"):
+        _required_text("", "req_field")
+    with pytest.raises(MarketDataInputError, match="must be a non-empty string"):
+        _required_text("   ", "req_field")
+    with pytest.raises(MarketDataInputError, match="must be a non-empty string"):
+        _required_text(123, "req_field")
+
+
+def test_normalize_event_strike_period_empty_string_regression():
+    # Regression test: Kalshi API returns strike_period="" for events like KXFEDDECISION-27DEC
+    payload = event_payload()
+    payload["event"]["strike_period"] = ""
+    event = normalize_event(payload)
+    assert event.strike_period is None
+
+    # Whitespace-only strike_period also normalizes to None
+    payload["event"]["strike_period"] = "   "
+    event_ws = normalize_event(payload)
+    assert event_ws.strike_period is None
+
+    # None strike_period remains None
+    payload["event"]["strike_period"] = None
+    event_none = normalize_event(payload)
+    assert event_none.strike_period is None
+
+    # Valid non-empty strike_period is preserved
+    payload["event"]["strike_period"] = "annual"
+    event_valid = normalize_event(payload)
+    assert event_valid.strike_period == "annual"
+
+    # Required field rejects empty or whitespace-only
+    payload["event"]["title"] = ""
+    with pytest.raises(MarketDataInputError, match="event title"):
+        normalize_event(payload)
+
+    payload["event"]["title"] = "   "
+    with pytest.raises(MarketDataInputError, match="event title"):
+        normalize_event(payload)

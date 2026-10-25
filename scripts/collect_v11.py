@@ -32,6 +32,7 @@ if str(ROOT) not in sys.path:
 
 from kalshi_arbitrage.evidence_storage import EvidenceStore
 from kalshi_arbitrage.market_data_provider import RestMarketDataProvider
+from kalshi_arbitrage.observer import load_declared_baskets
 from kalshi_arbitrage.v10_evaluation import (
     V10EvaluationConfig,
     V10HistoricalStrategyEvaluator,
@@ -43,6 +44,7 @@ from kalshi_arbitrage.v11_collector import (
     V11EvidenceQualityAuditor,
     V11EvidenceQualityMetrics,
     V11MarketEvidenceCollector,
+    _compute_file_sha256,
 )
 
 
@@ -172,6 +174,24 @@ def main() -> int:
         help="Explicit market tickers to monitor (default: discover open binary markets).",
     )
     parser.add_argument(
+        "--basket-file",
+        type=str,
+        default=None,
+        help="Path to JSON file declaring MECE event basket(s) for multi-outcome evaluation.",
+    )
+    parser.add_argument(
+        "--basket-json",
+        type=str,
+        default=None,
+        help="JSON string declaring MECE event basket(s) for multi-outcome evaluation.",
+    )
+    parser.add_argument(
+        "--max-leg-skew",
+        type=float,
+        default=5.0,
+        help="Maximum allowable timestamp skew across legs in seconds (default: 5.0).",
+    )
+    parser.add_argument(
         "--prospective-eval",
         action="store_true",
         help="Enable prospective forward paper evaluation during collection.",
@@ -222,11 +242,22 @@ def main() -> int:
 
     # 1. Bounded Collection Mode
     if args.collect:
+        declared_baskets = ()
+        if args.basket_file or args.basket_json:
+            try:
+                declared_baskets = load_declared_baskets(args.basket_file or args.basket_json)
+            except Exception as exc:
+                print(f"\n[ERROR] Invalid basket configuration: {exc}", file=sys.stderr)
+                return 1
+
+        enable_eval = args.prospective_eval or bool(declared_baskets)
         out_dir = Path(args.output_dir)
         config = V11CollectorConfig(
             session_name=args.session_name,
             output_dir=out_dir,
             target_tickers=tuple(args.tickers) if args.tickers else None,
+            declared_baskets=declared_baskets,
+            max_leg_timestamp_skew_seconds=args.max_leg_skew,
             max_markets_per_cycle=args.max_markets,
             poll_interval_seconds=args.poll_interval,
             max_cycles=args.max_cycles,
@@ -234,7 +265,7 @@ def main() -> int:
             max_observations=args.max_observations,
             resume=args.resume,
             prevent_overwrite=not args.resume,
-            enable_prospective_evaluation=args.prospective_eval,
+            enable_prospective_evaluation=enable_eval,
         )
 
         try:
@@ -244,6 +275,10 @@ def main() -> int:
             print(f"  Max Markets/Cycle:  {config.max_markets_per_cycle}")
             print(f"  Poll Interval:      {config.poll_interval_seconds}s")
             print(f"  Prospective Eval:   {'ENABLED' if config.enable_prospective_evaluation else 'DISABLED'}")
+            if config.declared_baskets:
+                print(f"  Declared Baskets:   {len(config.declared_baskets)} basket(s) configured")
+                for b in config.declared_baskets:
+                    print(f"    - Event: {b.event_ticker} ({len(b.outcomes)} outcomes: {b.ordered_tickers})")
             print("Press Ctrl+C at any time for clean graceful shutdown.\n")
 
             manifest = collector.run()
@@ -261,6 +296,16 @@ def main() -> int:
                 print(f"  Completed Arbitrages: {fin['completed_arbs']}")
                 print(f"  Net Realized P&L:     {fin['net_realized_pnl_cents']:+d}¢")
                 print(f"  Ledger Reconciled:    {'PASS (100% Invariant Match)' if fin['is_ledger_reconciled'] else 'FAIL'}")
+                if fin.get("baskets_evaluated", 0) > 0:
+                    print(
+                        f"  Baskets Evaluated:    {fin['baskets_evaluated']} "
+                        f"({fin['basket_qualified']} qualified, "
+                        f"{fin['basket_rej_no_gross_edge']} no edge, "
+                        f"{fin['basket_rej_unprofitable_fees']} unprof fees, "
+                        f"{fin['basket_rej_insufficient_depth']} no depth, "
+                        f"{fin['basket_rej_missing_market']} missing legs, "
+                        f"{fin['basket_rej_leg_skew']} skew)"
+                    )
 
             return 0
         except FileExistsError as exc:
@@ -312,6 +357,45 @@ def main() -> int:
         from kalshi_arbitrage.evaluation import HistoricalDataset
 
         dataset = HistoricalDataset.from_file(obs_path)
+
+        declared_baskets = ()
+        if args.basket_file or args.basket_json:
+            try:
+                declared_baskets = load_declared_baskets(args.basket_file or args.basket_json)
+            except Exception as exc:
+                print(f"[ERROR] Invalid basket configuration: {exc}", file=sys.stderr)
+                return 1
+
+        if declared_baskets:
+            from kalshi_arbitrage.v13_basket_replay import (
+                HistoricalBasketReplayConfig,
+                HistoricalBasketReplayEngine,
+            )
+            basket_cfg = HistoricalBasketReplayConfig(
+                max_leg_timestamp_skew_seconds=args.max_leg_skew,
+            )
+            engine = HistoricalBasketReplayEngine(config=basket_cfg)
+            summary = engine.replay(
+                dataset.observations,
+                declared_baskets,
+                source_path=str(obs_path),
+                dataset_sha256=_compute_file_sha256(obs_path),
+            )
+            md_report = summary.summary_markdown()
+            print(md_report)
+
+            if args.output_report:
+                with open(args.output_report, "w", encoding="utf-8") as f:
+                    f.write(md_report + "\n")
+                print(f"Saved evaluation report to: {args.output_report}")
+
+            if args.output_json:
+                with open(args.output_json, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(summary.to_dict(), indent=2) + "\n")
+                print(f"\nSaved basket evaluation JSON to: {args.output_json}")
+
+            return 0
+
         evaluator = V10HistoricalStrategyEvaluator()
         report = evaluator.evaluate(dataset, source_path=str(obs_path))
 

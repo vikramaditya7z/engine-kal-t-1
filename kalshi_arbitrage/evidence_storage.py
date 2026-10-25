@@ -208,6 +208,13 @@ def observation_to_dict(obs: MarketObservation) -> Dict[str, Any]:
         "is_stale": obs.is_stale,
         "staleness_reason": obs.staleness_reason,
         "error_message": obs.error_message,
+        "source_transport": obs.source_transport,
+        "stream_seq": obs.stream_seq,
+        "local_receive_time": _datetime_to_iso(obs.local_receive_time),
+        "sync_state": obs.sync_state,
+        "data_quality_flags": list(obs.data_quality_flags),
+        "session_id": obs.session_id,
+        "config_fingerprint": obs.config_fingerprint,
     }
 
 
@@ -216,9 +223,9 @@ def observation_from_dict(d: Dict[str, Any]) -> MarketObservation:
     if not isinstance(d, dict):
         raise CorruptedEvidenceError(f"Expected dict, got {type(d).__name__}")
     version = d.get("schema_version")
-    if version != EVIDENCE_SCHEMA_VERSION:
+    if version not in (EVIDENCE_SCHEMA_VERSION, "1.1"):
         raise CorruptedEvidenceError(
-            f"Unsupported schema version {version!r} (expected {EVIDENCE_SCHEMA_VERSION!r})"
+            f"Unsupported schema version {version!r} (expected {EVIDENCE_SCHEMA_VERSION!r} or '1.1')"
         )
 
     for field in ("observation_id", "ticker", "observed_at", "is_success", "is_stale"):
@@ -236,10 +243,21 @@ def observation_from_dict(d: Dict[str, Any]) -> MarketObservation:
         is_stale=bool(d["is_stale"]),
         staleness_reason=d.get("staleness_reason"),
         error_message=d.get("error_message"),
+        source_transport=str(d.get("source_transport", "REST")),
+        stream_seq=d.get("stream_seq"),
+        local_receive_time=_iso_to_datetime(d.get("local_receive_time")),
+        sync_state=str(d.get("sync_state", "SYNCHRONIZED")),
+        data_quality_flags=tuple(d.get("data_quality_flags", ())),
+        session_id=d.get("session_id"),
+        config_fingerprint=d.get("config_fingerprint"),
     )
 
 
-def _arbitrage_opportunity_to_dict(opp: ArbitrageOpportunity) -> Dict[str, Any]:
+def _arbitrage_opportunity_to_dict(
+    opp: Optional[ArbitrageOpportunity],
+) -> Optional[Dict[str, Any]]:
+    if opp is None:
+        return None
     return {
         "opportunity_type": opp.opportunity_type,
         "is_arbitrage": opp.is_arbitrage,
@@ -262,7 +280,11 @@ def _arbitrage_opportunity_to_dict(opp: ArbitrageOpportunity) -> Dict[str, Any]:
     }
 
 
-def _arbitrage_opportunity_from_dict(d: Dict[str, Any]) -> ArbitrageOpportunity:
+def _arbitrage_opportunity_from_dict(
+    d: Optional[Dict[str, Any]],
+) -> Optional[ArbitrageOpportunity]:
+    if d is None:
+        return None
     return ArbitrageOpportunity(
         opportunity_type=d["opportunity_type"],
         is_arbitrage=d["is_arbitrage"],
@@ -469,7 +491,7 @@ def opportunity_from_dict(d: Dict[str, Any]) -> EvaluatedOpportunity:
         source_timestamps=source_ts,
         leg_timestamp_skew_seconds=float(d.get("leg_timestamp_skew_seconds", 0.0)),
         market_tickers=tuple(d.get("market_tickers", ())),
-        candidate_opportunity=_arbitrage_opportunity_from_dict(d["candidate_opportunity"]),
+        candidate_opportunity=_arbitrage_opportunity_from_dict(d.get("candidate_opportunity")),
         pricing_result=_pricing_result_from_dict(d.get("pricing_result")),
         status=str(d["status"]),
         rejection_reason=d.get("rejection_reason"),

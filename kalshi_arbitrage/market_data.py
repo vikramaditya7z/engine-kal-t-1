@@ -28,7 +28,7 @@ def _require_mapping(value: object, name: str) -> Mapping[str, Any]:
 
 
 def _required_text(value: object, name: str) -> str:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         raise MarketDataInputError(f"{name} must be a non-empty string")
     return value
 
@@ -36,13 +36,13 @@ def _required_text(value: object, name: str) -> str:
 def _optional_text(value: object, name: str) -> Optional[str]:
     if value is None:
         return None
+    if isinstance(value, str) and not value.strip():
+        return None
     return _required_text(value, name)
 
 
 def _optional_text_allow_empty(value: object, name: str) -> Optional[str]:
     """Treat an API-provided empty text field as unspecified metadata."""
-    if value == "":
-        return None
     return _optional_text(value, name)
 
 

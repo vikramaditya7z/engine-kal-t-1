@@ -1,0 +1,44 @@
+[
+  {
+    "basket_id": "FED-DEC26-MECE",
+    "event_ticker": "KXFEDDECISION-26DEC",
+    "outcomes": [
+      "CUT_MORE_THAN_25",
+      "CUT_25",
+      "MAINTAIN",
+      "HIKE_25",
+      "HIKE_MORE_THAN_25"
+    ],
+    "market_outcome_map": {
+      "KXFEDDECISION-26DEC-C26": "CUT_MORE_THAN_25",
+      "KXFEDDECISION-26DEC-C25": "CUT_25",
+      "KXFEDDECISION-26DEC-H0": "MAINTAIN",
+      "KXFEDDECISION-26DEC-H25": "HIKE_25",
+      "KXFEDDECISION-26DEC-H26": "HIKE_MORE_THAN_25"
+    },
+    "basket_side": "yes",
+    "notes": "December 2026 Fed Rate Decision 5-outcome mutually exclusive and collectively exhaustive basket. Validated by official Kalshi market rules and FOMC meeting partition.",
+    "validation_status": "VALIDATED_MECE"
+  },
+  {
+    "basket_id": "FED-DEC27-MECE",
+    "event_ticker": "KXFEDDECISION-27DEC",
+    "outcomes": [
+      "CUT_MORE_THAN_25",
+      "CUT_25",
+      "MAINTAIN",
+      "HIKE_25",
+      "HIKE_MORE_THAN_25"
+    ],
+    "market_outcome_map": {
+      "KXFEDDECISION-27DEC-C26": "CUT_MORE_THAN_25",
+      "KXFEDDECISION-27DEC-C25": "CUT_25",
+      "KXFEDDECISION-27DEC-H0": "MAINTAIN",
+      "KXFEDDECISION-27DEC-H25": "HIKE_25",
+      "KXFEDDECISION-27DEC-H26": "HIKE_MORE_THAN_25"
+    },
+    "basket_side": "yes",
+    "notes": "December 2027 Fed Rate Decision 5-outcome mutually exclusive and collectively exhaustive basket. Validated by official Kalshi market rules and FOMC meeting partition.",
+    "validation_status": "VALIDATED_MECE"
+  }
+]
