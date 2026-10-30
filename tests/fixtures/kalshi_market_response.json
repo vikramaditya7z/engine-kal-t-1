@@ -1,82 +1,97 @@
 {
   "market": {
     "can_close_early": true,
-    "close_time": "2026-10-14T19:15:00Z",
-    "created_time": "2026-10-12T07:44:36.908003Z",
+    "close_time": "2026-10-30T00:00:00Z",
+    "created_time": "2026-10-27T16:00:02.308835Z",
     "custom_strike": {
-      "Associated Events": "KXALLSVENSKANGAME-26OCT12ELFHAL,KXARGPREMDIVGAME-26OCT12LANVEL,KXBRASILEIROBGAME-26OCT12FORBRA,KXEPLGAME-26OCT12COVNEW,KXLALIGA2GAME-26OCT12VLLALB,KXLALIGAGAME-26OCT12LEVSEV,KXLIGAPORTUGALGAME-26OCT12FAMALV,KXSERIEAGAME-26OCT12ATAVEN,KXSERIEAGAME-26OCT12TORUDI,KXSUPERLIGGAME-26OCT12EYUGOZ",
-      "Associated Market Sides": "yes,no,no,no,no,no,no,yes,no,no",
-      "Associated Markets": "KXALLSVENSKANGAME-26OCT12ELFHAL-ELF,KXARGPREMDIVGAME-26OCT12LANVEL-VEL,KXBRASILEIROBGAME-26OCT12FORBRA-BRA,KXEPLGAME-26OCT12COVNEW-COV,KXLALIGA2GAME-26OCT12VLLALB-ALB,KXLALIGAGAME-26OCT12LEVSEV-LEV,KXLIGAPORTUGALGAME-26OCT12FAMALV-ALV,KXSERIEAGAME-26OCT12ATAVEN-ATA,KXSERIEAGAME-26OCT12TORUDI-TOR,KXSUPERLIGGAME-26OCT12EYUGOZ-EYU",
-      "Multivariate Event Ticker": "KXMVECROSSCATEGORY-S202626D27E5BE85"
+      "Associated Events": "KXNBAAST-26OCT27SACSAS,KXNBAAST-26OCT27SACSAS,KXNBAGAME-26OCT27BKNBOS,KXNBAGAME-26OCT27SACSAS,KXNBAPTS-26OCT27BKNBOS,KXNBAPTS-26OCT27DETNYK,KXNBAPTS-26OCT27DETNYK,KXNBAPTS-26OCT27DETNYK,KXNBAPTS-26OCT27SACSAS,KXNBAPTS-26OCT27SACSAS,KXNBAREB-26OCT27DETNYK,KXNBAREB-26OCT27DETNYK,KXNBAREB-26OCT27SACSAS",
+      "Associated Market Sides": "yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes",
+      "Associated Markets": "KXNBAAST-26OCT27SACSAS-SACDSABONIS11-4,KXNBAAST-26OCT27SACSAS-SASDHARPER2-2,KXNBAGAME-26OCT27BKNBOS-BOS,KXNBAGAME-26OCT27SACSAS-SAS,KXNBAPTS-26OCT27BKNBOS-BKNJRANDLE30-10,KXNBAPTS-26OCT27DETNYK-DETCCUNNINGHAM2-15,KXNBAPTS-26OCT27DETNYK-NYKJBRUNSON11-20,KXNBAPTS-26OCT27DETNYK-NYKKTOWNS32-10,KXNBAPTS-26OCT27SACSAS-SACDSABONIS11-10,KXNBAPTS-26OCT27SACSAS-SASSCASTLE5-10,KXNBAREB-26OCT27DETNYK-DETATHOMPSON9-2,KXNBAREB-26OCT27DETNYK-DETCCUNNINGHAM2-2,KXNBAREB-26OCT27SACSAS-SASVWEMBANYAMA1-6",
+      "Multivariate Event Ticker": "KXMVECROSSCATEGORY-S2026JARGQKX2CNQ5SH4S"
     },
-    "event_ticker": "KXMVECROSSCATEGORY-S202626D27E5BE85",
+    "event_ticker": "KXMVECROSSCATEGORY-S2026JARGQKX2CNQ5SH4S",
     "exchange_index": 1,
-    "expected_expiration_time": "2026-10-13T01:15:00Z",
-    "expiration_time": "2026-10-14T19:15:00Z",
+    "expected_expiration_time": "2026-10-28T06:00:00Z",
+    "expiration_time": "2026-10-30T00:00:00Z",
     "expiration_value": "",
     "is_provisional": true,
     "last_price_dollars": "0.0000",
-    "latest_expiration_time": "2026-10-14T19:15:00Z",
+    "latest_expiration_time": "2026-10-30T00:00:00Z",
     "market_type": "binary",
     "mve_collection_ticker": "KXMVECROSSCATEGORY-R",
     "mve_selected_legs": [
       {
-        "event_ticker": "KXALLSVENSKANGAME-26OCT12ELFHAL",
-        "market_ticker": "KXALLSVENSKANGAME-26OCT12ELFHAL-ELF",
+        "event_ticker": "KXNBAAST-26OCT27SACSAS",
+        "market_ticker": "KXNBAAST-26OCT27SACSAS-SACDSABONIS11-4",
         "side": "yes"
       },
       {
-        "event_ticker": "KXARGPREMDIVGAME-26OCT12LANVEL",
-        "market_ticker": "KXARGPREMDIVGAME-26OCT12LANVEL-VEL",
-        "side": "no"
-      },
-      {
-        "event_ticker": "KXBRASILEIROBGAME-26OCT12FORBRA",
-        "market_ticker": "KXBRASILEIROBGAME-26OCT12FORBRA-BRA",
-        "side": "no"
-      },
-      {
-        "event_ticker": "KXEPLGAME-26OCT12COVNEW",
-        "market_ticker": "KXEPLGAME-26OCT12COVNEW-COV",
-        "side": "no"
-      },
-      {
-        "event_ticker": "KXLALIGA2GAME-26OCT12VLLALB",
-        "market_ticker": "KXLALIGA2GAME-26OCT12VLLALB-ALB",
-        "side": "no"
-      },
-      {
-        "event_ticker": "KXLALIGAGAME-26OCT12LEVSEV",
-        "market_ticker": "KXLALIGAGAME-26OCT12LEVSEV-LEV",
-        "side": "no"
-      },
-      {
-        "event_ticker": "KXLIGAPORTUGALGAME-26OCT12FAMALV",
-        "market_ticker": "KXLIGAPORTUGALGAME-26OCT12FAMALV-ALV",
-        "side": "no"
-      },
-      {
-        "event_ticker": "KXSERIEAGAME-26OCT12ATAVEN",
-        "market_ticker": "KXSERIEAGAME-26OCT12ATAVEN-ATA",
+        "event_ticker": "KXNBAAST-26OCT27SACSAS",
+        "market_ticker": "KXNBAAST-26OCT27SACSAS-SASDHARPER2-2",
         "side": "yes"
       },
       {
-        "event_ticker": "KXSERIEAGAME-26OCT12TORUDI",
-        "market_ticker": "KXSERIEAGAME-26OCT12TORUDI-TOR",
-        "side": "no"
+        "event_ticker": "KXNBAGAME-26OCT27BKNBOS",
+        "market_ticker": "KXNBAGAME-26OCT27BKNBOS-BOS",
+        "side": "yes"
       },
       {
-        "event_ticker": "KXSUPERLIGGAME-26OCT12EYUGOZ",
-        "market_ticker": "KXSUPERLIGGAME-26OCT12EYUGOZ-EYU",
-        "side": "no"
+        "event_ticker": "KXNBAGAME-26OCT27SACSAS",
+        "market_ticker": "KXNBAGAME-26OCT27SACSAS-SAS",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAPTS-26OCT27BKNBOS",
+        "market_ticker": "KXNBAPTS-26OCT27BKNBOS-BKNJRANDLE30-10",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAPTS-26OCT27DETNYK",
+        "market_ticker": "KXNBAPTS-26OCT27DETNYK-DETCCUNNINGHAM2-15",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAPTS-26OCT27DETNYK",
+        "market_ticker": "KXNBAPTS-26OCT27DETNYK-NYKJBRUNSON11-20",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAPTS-26OCT27DETNYK",
+        "market_ticker": "KXNBAPTS-26OCT27DETNYK-NYKKTOWNS32-10",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAPTS-26OCT27SACSAS",
+        "market_ticker": "KXNBAPTS-26OCT27SACSAS-SACDSABONIS11-10",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAPTS-26OCT27SACSAS",
+        "market_ticker": "KXNBAPTS-26OCT27SACSAS-SASSCASTLE5-10",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAREB-26OCT27DETNYK",
+        "market_ticker": "KXNBAREB-26OCT27DETNYK-DETATHOMPSON9-2",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAREB-26OCT27DETNYK",
+        "market_ticker": "KXNBAREB-26OCT27DETNYK-DETCCUNNINGHAM2-2",
+        "side": "yes"
+      },
+      {
+        "event_ticker": "KXNBAREB-26OCT27SACSAS",
+        "market_ticker": "KXNBAREB-26OCT27SACSAS-SASVWEMBANYAMA1-6",
+        "side": "yes"
       }
     ],
     "no_ask_dollars": "1.0000",
     "no_bid_dollars": "1.0000",
-    "no_sub_title": "yes Elfsborg,no Velez Sarsfield,no CR Brasil,no Coventry,no Albacete,no Levante,no Alverca,yes Atalanta,no Torino,no Eyupspor",
+    "no_sub_title": "yes Domantas Sabonis: 4+,yes Dylan Harper: 2+,yes Boston,yes San Antonio,yes Julius Randle: 10+,yes Cade Cunningham: 15+,yes Jalen Brunson: 20+,yes Karl-Anthony Towns: 10+,yes Domantas Sabonis: 10+,yes Stephon Castle: 10+,yes Ausar Thompson: 2+,yes Cade Cunningham: 2+,yes Victor Wembanyama: 6+",
     "notional_value_dollars": "1.0000",
     "open_interest_fp": "0.00",
-    "open_time": "2026-10-12T07:44:36Z",
+    "open_time": "2026-10-27T16:00:02Z",
     "previous_price_dollars": "0.0000",
     "previous_yes_ask_dollars": "0.0000",
     "previous_yes_bid_dollars": "0.0000",
@@ -105,15 +120,15 @@
     "settlement_timer_seconds": 5,
     "status": "active",
     "strike_type": "custom",
-    "ticker": "KXMVECROSSCATEGORY-S202626D27E5BE85-1BB0357C619",
-    "title": "yes Elfsborg,no Velez Sarsfield,no CR Brasil,no Coventry,no Albacete,no Levante,no Alverca,yes Atalanta,no Torino,no Eyupspor",
-    "updated_time": "2026-10-12T07:44:37.304332Z",
+    "ticker": "KXMVECROSSCATEGORY-S2026JARGQKX2CNQ5SH4S-QQGQNGBU6",
+    "title": "yes Domantas Sabonis: 4+,yes Dylan Harper: 2+,yes Boston,yes San Antonio,yes Julius Randle: 10+,yes Cade Cunningham: 15+,yes Jalen Brunson: 20+,yes Karl-Anthony Towns: 10+,yes Domantas Sabonis: 10+,yes Stephon Castle: 10+,yes Ausar Thompson: 2+,yes Cade Cunningham: 2+,yes Victor Wembanyama: 6+",
+    "updated_time": "2026-10-27T16:00:02.308862Z",
     "volume_24h_fp": "0.00",
     "volume_fp": "0.00",
     "yes_ask_dollars": "0.0000",
     "yes_ask_size_fp": "0.00",
     "yes_bid_dollars": "0.0000",
     "yes_bid_size_fp": "0.00",
-    "yes_sub_title": "yes Elfsborg,no Velez Sarsfield,no CR Brasil,no Coventry,no Albacete,no Levante,no Alverca,yes Atalanta,no Torino,no Eyupspor"
+    "yes_sub_title": "yes Domantas Sabonis: 4+,yes Dylan Harper: 2+,yes Boston,yes San Antonio,yes Julius Randle: 10+,yes Cade Cunningham: 15+,yes Jalen Brunson: 20+,yes Karl-Anthony Towns: 10+,yes Domantas Sabonis: 10+,yes Stephon Castle: 10+,yes Ausar Thompson: 2+,yes Cade Cunningham: 2+,yes Victor Wembanyama: 6+"
   }
 }

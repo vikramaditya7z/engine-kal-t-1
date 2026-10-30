@@ -3,13 +3,18 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import formatdate, parsedate_to_datetime
+import http.client
 import json
 from math import isfinite
 import os
+import queue
+import socket
 import ssl
+import threading
+import time
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin, quote
+from urllib.parse import urlencode, urljoin, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from .market_data import (
@@ -142,6 +147,159 @@ class UrllibGetTransport:
             raise KalshiTransportError(f"GET request failed for {request_url}") from exc
 
 
+class PooledHTTPTransport:
+    """Thread-safe persistent HTTP/1.1 transport using standard-library http.client.
+
+    Reuses open TCP and TLS connections across sequential and concurrent requests,
+    eliminating redundant TCP 3-way handshakes and TLS session negotiations.
+
+    Maintains a LIFO pool of idle connections per (scheme, host, port).
+    Automatically detects broken or disconnected connections and retries once
+    with a fresh connection.
+    """
+
+    def __init__(
+        self,
+        ssl_context: Optional[ssl.SSLContext] = None,
+        max_pool_size: int = 10,
+    ) -> None:
+        if ssl_context is not None:
+            self._ssl_context = ssl_context
+        else:
+            cafile = os.environ.get("SSL_CERT_FILE")
+            if cafile:
+                if not os.path.exists(cafile):
+                    raise FileNotFoundError(
+                        f"Configured SSL_CERT_FILE does not exist: {cafile}"
+                    )
+                self._ssl_context = ssl.create_default_context(cafile=cafile)
+            else:
+                self._ssl_context = None
+
+        self.max_pool_size = max_pool_size
+        self._pools: Dict[Tuple[str, str, int], queue.LifoQueue] = {}
+        self._lock = threading.Lock()
+
+    def _get_pool(self, target: Tuple[str, str, int]) -> queue.LifoQueue:
+        with self._lock:
+            if target not in self._pools:
+                self._pools[target] = queue.LifoQueue(maxsize=self.max_pool_size)
+            return self._pools[target]
+
+    def _create_connection(
+        self, scheme: str, host: str, port: int, timeout_seconds: float
+    ) -> http.client.HTTPConnection:
+        if scheme == "https":
+            context = self._ssl_context or ssl.create_default_context()
+            return http.client.HTTPSConnection(
+                host=host, port=port, timeout=timeout_seconds, context=context
+            )
+        elif scheme == "http":
+            return http.client.HTTPConnection(
+                host=host, port=port, timeout=timeout_seconds
+            )
+        else:
+            raise ValueError(f"Unsupported URL scheme: {scheme!r}")
+
+    def get(
+        self, url: str, params: Mapping[str, str], timeout_seconds: float
+    ) -> HTTPResponse:
+        query = urlencode(params)
+        parsed = urlsplit(url)
+        scheme = parsed.scheme.lower()
+        if not scheme:
+            raise ValueError(f"URL missing scheme: {url}")
+        host = parsed.hostname or "localhost"
+        default_port = 443 if scheme == "https" else 80
+        port = parsed.port or default_port
+        target = (scheme, host, port)
+
+        path_and_query = parsed.path or "/"
+        if parsed.query and query:
+            path_and_query = f"{path_and_query}?{parsed.query}&{query}"
+        elif parsed.query:
+            path_and_query = f"{path_and_query}?{parsed.query}"
+        elif query:
+            path_and_query = f"{path_and_query}?{query}"
+
+        headers = {
+            "Accept": "application/json",
+            "Connection": "keep-alive",
+            "Host": parsed.netloc or host,
+        }
+
+        pool = self._get_pool(target)
+        conn: Optional[http.client.HTTPConnection] = None
+        is_reused = False
+
+        for attempt in range(2):
+            if conn is None:
+                try:
+                    conn = pool.get_nowait()
+                    is_reused = True
+                except queue.Empty:
+                    conn = self._create_connection(scheme, host, port, timeout_seconds)
+                    is_reused = False
+
+            conn.timeout = timeout_seconds
+
+            try:
+                conn.request("GET", path_and_query, headers=headers)
+                resp = conn.getresponse()
+                body = resp.read()
+                resp_headers = dict(resp.getheaders())
+
+                will_close = getattr(resp, "will_close", False) or resp_headers.get("connection", "").lower() == "close"
+                if not will_close:
+                    try:
+                        pool.put_nowait(conn)
+                    except queue.Full:
+                        conn.close()
+                else:
+                    conn.close()
+
+                return HTTPResponse(resp.status, body, headers=resp_headers)
+
+            except (http.client.RemoteDisconnected, http.client.BadStatusLine, BrokenPipeError, ConnectionResetError) as exc:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    conn = None
+                if is_reused and attempt == 0:
+                    continue
+                raise KalshiTransportError(f"GET request failed for {url}") from exc
+            except (socket.timeout, TimeoutError) as exc:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                raise KalshiTransportError(f"GET request timed out for {url}") from exc
+            except Exception as exc:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                raise KalshiTransportError(f"GET request failed for {url}") from exc
+
+        raise KalshiTransportError(f"GET request failed for {url}")
+
+    def close(self) -> None:
+        """Close all idle pooled connections."""
+        with self._lock:
+            for pool in self._pools.values():
+                while not pool.empty():
+                    try:
+                        conn = pool.get_nowait()
+                        conn.close()
+                    except (queue.Empty, Exception):
+                        break
+            self._pools.clear()
+
+
 Transport = Callable[[str, Mapping[str, str], float], HTTPResponse]
 
 
@@ -181,14 +339,23 @@ class KalshiRestClient:
         default_url = DEMO_BASE_URL if environment == "demo" else PRODUCTION_BASE_URL
         self.base_url = (base_url or default_url).rstrip("/")
         self.timeout_seconds = float(timeout_seconds)
-        self._transport = transport or UrllibGetTransport()
+        self._transport = transport or PooledHTTPTransport()
+        self._last_network_duration: float = 0.0
+        self._last_json_duration: float = 0.0
+
+    def close(self) -> None:
+        """Close underlying transport connections if supported."""
+        if hasattr(self._transport, "close") and callable(self._transport.close):
+            self._transport.close()
 
     def _get_json_response(
         self, path: str, params: Mapping[str, str]
     ) -> Tuple[Mapping[str, Any], HTTPResponse]:
         url = urljoin(f"{self.base_url}/", path.lstrip("/"))
         try:
+            t_net_start = time.monotonic()
             response = self._transport.get(url, params, self.timeout_seconds)
+            self._last_network_duration = max(0.0, time.monotonic() - t_net_start)
         except KalshiClientError:
             raise
         except (ConnectionError, OSError, TimeoutError) as exc:
@@ -206,8 +373,10 @@ class KalshiRestClient:
             body = response.body.decode("utf-8", errors="replace")
             raise KalshiHTTPError(response.status_code, url, body)
         try:
+            t_json_start = time.monotonic()
             decoded = response.body.decode("utf-8")
             payload = json.loads(decoded)
+            self._last_json_duration = max(0.0, time.monotonic() - t_json_start)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise KalshiJSONError(f"invalid JSON response from {url}") from exc
         return _object(payload, "response"), response
@@ -372,12 +541,17 @@ class KalshiRestClient:
         nested_markets = event_payload.get("markets")
         if nested_markets is None:
             nested_markets = payload.get("markets")
+        normalized_markets: Optional[Tuple[NormalizedMarket, ...]] = None
         if nested_markets is not None:
             if not isinstance(nested_markets, list):
                 raise KalshiResponseError("event markets must be an array")
+            norm_markets = []
             for nested_market in nested_markets:
-                normalize_market(_object(nested_market, "event market"))
-        return normalize_event(payload)
+                norm_markets.append(
+                    normalize_market(_object(nested_market, "event market"))
+                )
+            normalized_markets = tuple(norm_markets)
+        return normalize_event(payload, markets=normalized_markets)
 
     def get_order_book(self, ticker: str) -> NormalizedOrderBook:
         """Fetch and normalize order-book bid levels.

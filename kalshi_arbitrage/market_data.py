@@ -106,6 +106,13 @@ def _optional_timestamp(value: object, name: str) -> Optional[datetime]:
         return None
     if not isinstance(value, str) or not value:
         raise MarketDataInputError(f"{name} must be an ISO-8601 timestamp or null")
+    try:
+        s = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            return dt
+    except (ValueError, TypeError):
+        pass
     for format_string in (
         "%Y-%m-%dT%H:%M:%S.%f%z",
         "%Y-%m-%dT%H:%M:%S%z",
@@ -218,6 +225,7 @@ class NormalizedEvent:
     strike_date: Optional[datetime] = None
     strike_period: Optional[str] = None
     collateral_return_type: Optional[str] = None
+    markets: Optional[Tuple['NormalizedMarket', ...]] = None
 
     def __post_init__(self) -> None:
         _required_text(self.event_ticker, "event_ticker")
@@ -250,6 +258,11 @@ class NormalizedEvent:
             _required_text(self.strike_period, "strike_period")
         if self.collateral_return_type is not None:
             _required_text(self.collateral_return_type, "collateral_return_type")
+        if self.markets is not None:
+            if not isinstance(self.markets, tuple):
+                raise MarketDataInputError("markets must be a tuple or None")
+            if any(not isinstance(m, NormalizedMarket) for m in self.markets):
+                raise MarketDataInputError("markets must contain NormalizedMarket objects")
 
 
 @dataclass(frozen=True)
@@ -440,7 +453,10 @@ def _normalize_settlement_sources(value: object) -> Tuple[SettlementSource, ...]
     return tuple(sources)
 
 
-def normalize_event(payload: object) -> NormalizedEvent:
+def normalize_event(
+    payload: object,
+    markets: Optional[Tuple[NormalizedMarket, ...]] = None,
+) -> NormalizedEvent:
     """Validate a raw event response and preserve its relationship metadata."""
     raw = _require_mapping(payload, "event payload")
     event = _require_mapping(raw.get("event", raw), "event")
@@ -471,6 +487,7 @@ def normalize_event(payload: object) -> NormalizedEvent:
         collateral_return_type=_optional_text(
             event.get("collateral_return_type"), "collateral_return_type"
         ),
+        markets=markets,
     )
 
 

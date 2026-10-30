@@ -22,6 +22,7 @@ from decimal import Decimal
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .arbitrage import (
+    ArbitrageInputError,
     ArbitrageOpportunity,
     OPPORTUNITY_BINARY_PARITY,
     OPPORTUNITY_MECE_BASKET_LONG_NO,
@@ -180,7 +181,11 @@ def derive_ask_levels(book: NormalizedOrderBook, side: str) -> Tuple[AskLevel, .
 
     derived_asks: List[AskLevel] = []
     for bid in bids:
-        bid_cents = dollars_to_cents(bid.price_dollars)
+        try:
+            bid_cents = dollars_to_cents(bid.price_dollars)
+        except ArbitrageInputError:
+            # Sub-cent or out-of-range price levels cannot be matched on integer-cent grids
+            continue
         ask_cents = 100 - bid_cents
         qty = int(bid.quantity)
         if qty <= 0:

@@ -62,14 +62,35 @@ def _format_age(dt: Optional[datetime]) -> Optional[str]:
     return f"{int(diff // 86400)}d ago"
 
 
+def normalize_breadth_strategy_type(strat: Optional[str]) -> str:
+    """Normalize strategy identifiers across screening enums, candidate types, and UI filters."""
+    if not strat:
+        return ""
+    s = str(strat).strip().lower()
+    if s in ("mece_basket_long_yes", "mece_long_yes", "long_yes"):
+        return "mece_basket_long_yes"
+    if s in ("mece_basket_long_no", "mece_long_no", "long_no"):
+        return "mece_basket_long_no"
+    if s in ("binary_parity", "parity"):
+        return "binary_parity"
+    if s in ("crossed_book", "crossed_books", "signal"):
+        return "crossed_book"
+    return s
+
+
 class DashboardDataService:
     """Read-only data service powering dashboard metrics, tables, and audit views."""
 
-    def __init__(self, workspace_root: Optional[Union[str, Path]] = None) -> None:
+    def __init__(
+        self,
+        workspace_root: Optional[Union[str, Path]] = None,
+        default_scanner_dir: Optional[Union[str, Path]] = None,
+    ) -> None:
         if workspace_root is None:
             self.workspace_root = Path(__file__).resolve().parents[2]
         else:
             self.workspace_root = Path(workspace_root).resolve()
+        self.default_scanner_dir = Path(default_scanner_dir) if default_scanner_dir else None
 
     def get_available_datasets(self) -> List[Dict[str, Any]]:
         """Discover valid observation datasets across the workspace."""
@@ -121,6 +142,11 @@ class DashboardDataService:
 
     def resolve_dataset_path(self, dataset_identifier: Optional[str] = None) -> Path:
         """Resolve a dataset name or relative path to an absolute Path."""
+        if dataset_identifier == "live":
+            live_path = self.workspace_root / "data" / "live_collection" / "observations.jsonl"
+            if live_path.exists():
+                return live_path
+
         if not dataset_identifier or dataset_identifier == "default":
             default_path = self.workspace_root / "evidence_dashboard_trial" / "observations.jsonl"
             if default_path.exists():
@@ -641,9 +667,30 @@ class DashboardDataService:
         if paper_health.get("kill_switch_active"):
             warnings.append(f"Paper trading kill-switch is active: {paper_health.get('kill_switch_reason')}")
 
+        collector_health = self.get_continuous_collector_status()
+        if collector_health.get("status") == "STOPPED":
+            warnings.append("Continuous live collector is currently stopped.")
+
+        evaluator_health = self.get_continuous_evaluator_status()
+        if evaluator_health.get("status") == "STOPPED":
+            warnings.append("Continuous live evaluator is currently stopped.")
+
+        breadth_health = self.get_breadth_scanner_status()
+        if breadth_health.get("is_stale") and breadth_health.get("status") == "RUNNING":
+            warnings.append(
+                f"Breadth scanner telemetry is stale ({int(breadth_health.get('staleness_seconds') or 0)}s old). Old data is not live."
+            )
+
+        live_summary = self.get_live_pipeline_summary()
+
         return {
             "server_time": datetime.now(timezone.utc).isoformat(),
             "observer_process": proc_status,
+            "continuous_collector": collector_health,
+            "continuous_evaluator": evaluator_health,
+            "breadth_scanner": breadth_health,
+            "live_pipeline": live_summary,
+            "alert_service": self.get_alert_service_status(),
             "paper_trading": paper_health,
             "datasets_count": len(datasets),
             "total_records_stored": total_records,
@@ -651,6 +698,483 @@ class DashboardDataService:
             "warnings": warnings,
             "workspace_root": str(self.workspace_root),
         }
+
+    def get_continuous_collector_process_status(self) -> Dict[str, Any]:
+        """Audit OS process table to determine if run_continuous_collector.py is actively executing."""
+        try:
+            res = subprocess.run(
+                ["ps", "-eo", "pid,command"],
+                capture_output=True,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
+            if res.returncode != 0:
+                return {"is_running": False, "pid": None, "reason": f"ps exit code {res.returncode}"}
+
+            lines = res.stdout.strip().split("\n")
+            for line in lines:
+                parts = line.strip().split(maxsplit=1)
+                if len(parts) == 2:
+                    pid_str, cmd = parts
+                    if "scripts/run_continuous_collector.py" in cmd or ("run_continuous_collector" in cmd and "python" in cmd):
+                        if "grep" not in cmd and "pytest" not in cmd:
+                            try:
+                                return {"is_running": True, "pid": int(pid_str), "command": cmd}
+                            except ValueError:
+                                pass
+            return {"is_running": False, "pid": None}
+        except Exception as exc:
+            return {"is_running": False, "pid": None, "reason": str(exc)}
+
+    def get_continuous_collector_status(
+        self, state_filepath: Optional[Union[str, Path]] = None
+    ) -> Dict[str, Any]:
+        """Read-only telemetry for the continuous live market data collector."""
+        path = (
+            Path(state_filepath)
+            if state_filepath is not None
+            else self.workspace_root / "data" / "live_collector_state.json"
+        )
+
+        proc_status = self.get_continuous_collector_process_status()
+        is_proc_running = proc_status.get("is_running", False)
+
+        if not path.exists():
+            return {
+                "status": "RUNNING" if is_proc_running else "STOPPED",
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "session_id": None,
+                "last_successful_collection_time": None,
+                "latest_snapshot_timestamp": None,
+                "latest_snapshot_age_seconds": None,
+                "is_data_fresh": False,
+                "consecutive_failures": 0,
+                "successful_cycles_count": 0,
+                "failed_cycles_count": 0,
+                "total_cycles_count": 0,
+                "active_monitored_markets_count": 0,
+                "message": "No continuous collector state file found.",
+                "state_file": str(path),
+            }
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            now = datetime.now(timezone.utc)
+            snapshot_age = None
+            snap_str = data.get("latest_snapshot_timestamp")
+            if snap_str:
+                try:
+                    dt = datetime.fromisoformat(snap_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    snapshot_age = max(0.0, (now - dt).total_seconds())
+                except Exception:
+                    pass
+
+            persisted_status = data.get("status", "STOPPED")
+            if is_proc_running:
+                status_label = "RUNNING"
+            else:
+                status_label = persisted_status if persisted_status in ("STOPPED", "FAILED") else "STOPPED"
+
+            max_stale = float(data.get("max_stale_seconds", 60.0))
+            is_fresh = (
+                status_label == "RUNNING"
+                and int(data.get("consecutive_failures", 0)) == 0
+                and snapshot_age is not None
+                and snapshot_age <= max_stale
+            )
+
+            res = dict(data)
+            res.update({
+                "status": status_label,
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "latest_snapshot_age_seconds": snapshot_age,
+                "is_data_fresh": is_fresh,
+                "state_file": str(path),
+            })
+            return res
+        except Exception as exc:
+            logger.warning(f"Error loading continuous collector state from {path}: {exc}")
+            return {
+                "status": "ERROR",
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "error": str(exc),
+                "state_file": str(path),
+            }
+
+    def get_continuous_evaluator_process_status(self) -> Dict[str, Any]:
+        """Audit OS process table to determine if run_continuous_evaluator.py is actively executing."""
+        try:
+            res = subprocess.run(
+                ["ps", "-eo", "pid,command"],
+                capture_output=True,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
+            if res.returncode != 0:
+                return {"is_running": False, "pid": None, "reason": f"ps exit code {res.returncode}"}
+
+            lines = res.stdout.strip().split("\n")
+            for line in lines:
+                parts = line.strip().split(maxsplit=1)
+                if len(parts) == 2:
+                    pid_str, cmd = parts
+                    if "scripts/run_continuous_evaluator.py" in cmd or ("run_continuous_evaluator" in cmd and "python" in cmd):
+                        if "grep" not in cmd and "pytest" not in cmd:
+                            try:
+                                return {"is_running": True, "pid": int(pid_str), "command": cmd}
+                            except ValueError:
+                                pass
+            return {"is_running": False, "pid": None}
+        except Exception as exc:
+            return {"is_running": False, "pid": None, "reason": str(exc)}
+
+    def get_continuous_evaluator_status(
+        self, state_filepath: Optional[Union[str, Path]] = None
+    ) -> Dict[str, Any]:
+        """Read-only telemetry for the continuous live arbitrage detection engine."""
+        path = (
+            Path(state_filepath)
+            if state_filepath is not None
+            else self.workspace_root / "data" / "live_evaluator_state.json"
+        )
+
+        proc_status = self.get_continuous_evaluator_process_status()
+        is_proc_running = proc_status.get("is_running", False)
+
+        if not path.exists():
+            return {
+                "status": "RUNNING" if is_proc_running else "STOPPED",
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "session_id": None,
+                "last_evaluation_time": None,
+                "latest_input_timestamp": None,
+                "evaluations_count": 0,
+                "processed_observations_count": 0,
+                "active_candidates_count": 0,
+                "total_candidates_detected": 0,
+                "candidate_transitions_count": 0,
+                "message": "No continuous evaluator state file found.",
+                "state_file": str(path),
+            }
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            persisted_status = data.get("status", "STOPPED")
+            if is_proc_running:
+                status_label = "RUNNING"
+            else:
+                status_label = persisted_status if persisted_status in ("STOPPED", "FAILED") else "STOPPED"
+
+            res = dict(data)
+            res.update({
+                "status": status_label,
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "state_file": str(path),
+            })
+            return res
+        except Exception as exc:
+            logger.warning(f"Error loading continuous evaluator state from {path}: {exc}")
+            return {
+                "status": "ERROR",
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "error": str(exc),
+                "state_file": str(path),
+            }
+
+    def get_live_pipeline_summary(self) -> Dict[str, Any]:
+        """Aggregate operational telemetry across collector, evaluator, and execution qualification."""
+        now = datetime.now(timezone.utc)
+        collector = self.get_continuous_collector_status()
+        evaluator = self.get_continuous_evaluator_status()
+
+        collector_running = collector.get("process_running", False) or collector.get("status") == "RUNNING"
+        evaluator_running = evaluator.get("process_running", False) or evaluator.get("status") == "RUNNING"
+
+        # Determine overall pipeline status
+        if collector_running and evaluator_running:
+            is_fresh = collector.get("is_data_fresh", False)
+            failures = int(collector.get("consecutive_failures", 0))
+            if is_fresh and failures == 0:
+                pipeline_status = "HEALTHY"
+            else:
+                pipeline_status = "DEGRADED"
+        elif collector_running or evaluator_running:
+            pipeline_status = "PARTIAL"
+        else:
+            pipeline_status = "STOPPED"
+
+        provenance = "LIVE" if (collector_running or evaluator_running) else "STOPPED"
+
+        # Recent error messages
+        recent_errors: List[str] = []
+        if collector.get("last_error"):
+            recent_errors.append(f"Collector Error: {collector['last_error']}")
+        if evaluator.get("last_error"):
+            recent_errors.append(f"Evaluator Error: {evaluator['last_error']}")
+
+        # Candidate and qualification metrics
+        active_cands = evaluator.get("active_candidates", [])
+        qual_count = int(evaluator.get("qualified_candidates_count", 0))
+        rej_count = int(evaluator.get("rejected_candidates_count", 0))
+        qual_summary = evaluator.get("qualification_summary", {})
+        outcomes = dict(qual_summary.get("outcomes_breakdown", {}))
+
+        # Alert Engine telemetry (V24)
+        alert_status = self.get_alert_service_status()
+
+        return {
+            "pipeline_status": pipeline_status,
+            "provenance": provenance,
+            "server_time": now.isoformat(),
+            "collector": collector,
+            "evaluator": evaluator,
+            "alerts": alert_status,
+            "collector_status": collector.get("status", "STOPPED"),
+            "evaluator_status": evaluator.get("status", "STOPPED"),
+            "alert_status": alert_status.get("status", "STOPPED"),
+            "latest_snapshot_timestamp": collector.get("latest_snapshot_timestamp"),
+            "latest_snapshot_age_seconds": collector.get("latest_snapshot_age_seconds"),
+            "is_data_fresh": collector.get("is_data_fresh", False),
+            "last_evaluation_time": evaluator.get("last_evaluation_time"),
+            "active_monitored_markets_count": collector.get("active_monitored_markets_count", 0),
+            "processed_observations_count": evaluator.get("processed_observations_count", 0),
+            "active_candidates_count": evaluator.get("active_candidates_count", 0),
+            "qualified_candidates_count": qual_count,
+            "rejected_candidates_count": rej_count,
+            "outcomes_breakdown": outcomes,
+            "alerts_created_count": alert_status.get("alerts_created_count", 0),
+            "alerts_delivered_count": alert_status.get("alerts_delivered_count", 0),
+            "alerts_failed_count": alert_status.get("alerts_failed_count", 0),
+            "recent_errors": recent_errors,
+        }
+
+    def get_continuous_evaluator_candidates(
+        self,
+        state_filepath: Optional[Union[str, Path]] = None,
+        strategy: Optional[str] = None,
+        outcome: Optional[str] = None,
+        state: Optional[str] = None,
+        market: Optional[str] = None,
+        is_qualified: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return list of currently active arbitrage candidates from state file, with optional filters."""
+        status = self.get_continuous_evaluator_status(state_filepath)
+        candidates = list(status.get("active_candidates", []))
+
+        filtered = []
+        for cand in candidates:
+            # Strategy filter
+            if strategy and cand.get("strategy_type") != strategy:
+                continue
+
+            # State filter
+            if state and cand.get("state") != state:
+                continue
+
+            # Qualification filter
+            cand_is_qual = cand.get("is_qualified", False)
+            if is_qualified is not None and cand_is_qual != is_qualified:
+                continue
+
+            # Outcome filter
+            qual = cand.get("qualification")
+            cand_outcome = qual.get("outcome") if isinstance(qual, dict) else cand.get("status")
+            if outcome and cand_outcome != outcome:
+                continue
+
+            # Market filter
+            if market:
+                market_lower = market.lower()
+                cand_id = str(cand.get("candidate_id", "")).lower()
+                cand_market = str(cand.get("market_ticker", "")).lower()
+                cand_markets = [str(m).lower() for m in cand.get("market_tickers", ())]
+                if market_lower not in cand_id and market_lower not in cand_market and not any(market_lower in m for m in cand_markets):
+                    continue
+
+            filtered.append(cand)
+
+        return filtered
+
+    def get_continuous_evaluator_qualified_candidates(
+        self,
+        state_filepath: Optional[Union[str, Path]] = None,
+        strategy: Optional[str] = None,
+        market: Optional[str] = None,
+        min_profit_cents: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return list of currently active candidates that are execution-qualified, with optional filters."""
+        candidates = self.get_continuous_evaluator_candidates(
+            state_filepath=state_filepath,
+            strategy=strategy,
+            market=market,
+            is_qualified=True,
+        )
+
+        qualified = []
+        for cand in candidates:
+            qual = cand.get("qualification")
+            if isinstance(qual, dict):
+                if qual.get("is_qualified") is True:
+                    if min_profit_cents is not None:
+                        net_cents = qual.get("net_edge_cents", 0)
+                        if net_cents < min_profit_cents:
+                            continue
+                    qualified.append(cand)
+            elif cand.get("is_qualified") is True:
+                if min_profit_cents is not None:
+                    net_cents = cand.get("net_edge_cents", 0)
+                    if net_cents < min_profit_cents:
+                        continue
+                qualified.append(cand)
+
+        return qualified
+
+    def get_continuous_evaluator_history(
+        self,
+        history_filepath: Optional[Union[str, Path]] = None,
+        limit: int = 100,
+        candidate_id: Optional[str] = None,
+        to_state: Optional[str] = None,
+        outcome: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return candidate lifecycle transition history from JSONL file in reverse order, with optional filters."""
+        path = (
+            Path(history_filepath)
+            if history_filepath is not None
+            else self.workspace_root / "data" / "live_candidate_history.jsonl"
+        )
+        if not path.exists():
+            return []
+
+        records = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            record = json.loads(line)
+                            # Candidate filter
+                            if candidate_id and record.get("candidate_id") != candidate_id:
+                                continue
+                            # To state filter
+                            if to_state and record.get("to_state") != to_state:
+                                continue
+                            # Outcome filter
+                            if outcome and record.get("qualification_outcome") != outcome:
+                                continue
+                            records.append(record)
+                        except Exception:
+                            pass
+            records.reverse()
+            return records[:limit]
+        except Exception as exc:
+            logger.warning(f"Error reading candidate history from {path}: {exc}")
+            return []
+
+    def get_alert_service_status(
+        self, state_filepath: Optional[Union[str, Path]] = None
+    ) -> Dict[str, Any]:
+        """Read-only telemetry for the V24 qualified-opportunity alert engine."""
+        path = (
+            Path(state_filepath)
+            if state_filepath is not None
+            else self.workspace_root / "data" / "live_alert_state.json"
+        )
+        if not path.exists():
+            return {
+                "status": "STOPPED",
+                "enabled": False,
+                "enabled_channels": ["local_history"],
+                "alerts_created_count": 0,
+                "alerts_delivered_count": 0,
+                "alerts_failed_count": 0,
+                "pending_queue_depth": 0,
+                "last_alert_time": None,
+                "last_delivery_time": None,
+                "channel_last_delivery_time": {},
+                "tracked_candidates_count": 0,
+                "currently_qualified_count": 0,
+                "recent_delivery_errors": [],
+                "state_file": str(path),
+            }
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Reconcile status with continuous evaluator daemon process
+            eval_proc = self.get_continuous_evaluator_process_status()
+            is_eval_running = eval_proc.get("is_running", False)
+            persisted_status = data.get("status", "STOPPED")
+            status_label = "RUNNING" if is_eval_running else (
+                persisted_status if persisted_status in ("STOPPED", "DISABLED") else "STOPPED"
+            )
+
+            res = dict(data)
+            res.update({
+                "status": status_label,
+                "state_file": str(path),
+            })
+            return res
+        except Exception as exc:
+            logger.warning(f"Error loading alert state from {path}: {exc}")
+            return {
+                "status": "ERROR",
+                "error": str(exc),
+                "state_file": str(path),
+            }
+
+    def get_alert_history(
+        self,
+        history_filepath: Optional[Union[str, Path]] = None,
+        limit: int = 50,
+        event_type: Optional[str] = None,
+        candidate_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Read persisted alert history in reverse chronological order with optional filters."""
+        path = (
+            Path(history_filepath)
+            if history_filepath is not None
+            else self.workspace_root / "data" / "live_alert_history.jsonl"
+        )
+        if not path.exists():
+            return []
+
+        try:
+            alerts: List[Dict[str, Any]] = []
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    clean = line.strip()
+                    if clean:
+                        try:
+                            record = json.loads(clean)
+                            if event_type and record.get("event_type") != event_type:
+                                continue
+                            if candidate_id and record.get("candidate_id") != candidate_id:
+                                continue
+                            alerts.append(record)
+                        except Exception:
+                            pass
+            alerts.reverse()
+            return alerts[:limit]
+        except Exception as exc:
+            logger.warning(f"Error reading alert history from {path}: {exc}")
+            return []
 
     def get_paper_trader_process_status(self) -> Dict[str, Any]:
         """Audit OS process table to determine if run_paper_trader.py is actively executing."""
@@ -769,3 +1293,469 @@ class DashboardDataService:
                 "error": str(exc),
                 "state_file": str(path),
             }
+
+    def get_breadth_scanner_process_status(self) -> Dict[str, Any]:
+        """Audit OS process table to determine if run_breadth_scanner.py is actively executing."""
+        try:
+            res = subprocess.run(
+                ["ps", "-eo", "pid,command"],
+                capture_output=True,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
+            if res.returncode != 0:
+                return {"is_running": False, "pid": None, "reason": f"ps exit code {res.returncode}"}
+
+            lines = res.stdout.strip().split("\n")
+            for line in lines:
+                parts = line.strip().split(maxsplit=1)
+                if len(parts) == 2:
+                    pid_str, cmd = parts
+                    if "scripts/run_breadth_scanner.py" in cmd or ("run_breadth_scanner" in cmd and "python" in cmd):
+                        if "grep" not in cmd and "pytest" not in cmd:
+                            try:
+                                return {"is_running": True, "pid": int(pid_str), "command": cmd}
+                            except ValueError:
+                                pass
+            return {"is_running": False, "pid": None}
+        except Exception as exc:
+            return {"is_running": False, "pid": None, "reason": str(exc)}
+
+    def _resolve_breadth_scanner_dir(
+        self, scanner_dir: Optional[Union[str, Path]] = None
+    ) -> Path:
+        """Resolve breadth scanner directory from argument, instance default, env, or project default."""
+        if scanner_dir is not None:
+            p = Path(scanner_dir)
+            return p if p.is_absolute() else (self.workspace_root / p)
+        if self.default_scanner_dir is not None:
+            return (
+                self.default_scanner_dir
+                if self.default_scanner_dir.is_absolute()
+                else (self.workspace_root / self.default_scanner_dir)
+            )
+        env_dir = os.environ.get("KALSHI_SCANNER_DIR") or os.environ.get("BREADTH_SCANNER_DIR")
+        if env_dir:
+            p = Path(env_dir)
+            return p if p.is_absolute() else (self.workspace_root / p)
+        return self.workspace_root / "data" / "breadth_scanner"
+
+    def get_breadth_scanner_status(
+        self,
+        scanner_dir: Optional[Union[str, Path]] = None,
+        max_stale_seconds: float = 60.0,
+    ) -> Dict[str, Any]:
+        """Read-only telemetry for the Phase 2A–2D breadth-first continuous scanner."""
+        base_dir = self._resolve_breadth_scanner_dir(scanner_dir)
+        state_path = base_dir / "scanner_state.json"
+        proc_status = self.get_breadth_scanner_process_status()
+        is_proc_running = proc_status.get("is_running", False)
+
+        now = datetime.now(timezone.utc)
+
+        if not state_path.exists():
+            return {
+                "status": "INITIALIZING" if is_proc_running else "STOPPED",
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "session_id": None,
+                "started_at": None,
+                "updated_at": None,
+                "current_cycle": 0,
+                "total_cycles_count": 0,
+                "successful_cycles_count": 0,
+                "failed_cycles_count": 0,
+                "last_successful_discovery_time": None,
+                "last_catalog_complete": False,
+                "total_unique_markets_discovered": 0,
+                "total_eligible_markets": 0,
+                "total_unique_markets_screened": 0,
+                "total_events_evaluated": 0,
+                "total_strategies_evaluated": 0,
+                "total_preliminary_candidates_generated": 0,
+                "candidates_enqueued": 0,
+                "candidates_pending": 0,
+                "candidates_deduplicated": 0,
+                "qualification_counts": {},
+                "qualified_candidates_count": 0,
+                "api_requests_count": 0,
+                "api_retries_count": 0,
+                "api_failures_count": 0,
+                "rate_limit_events_count": 0,
+                "queue_overflow_count": 0,
+                "last_error": None,
+                "last_error_time": None,
+                "output_dir": str(base_dir),
+                "state_file": str(state_path),
+                "staleness_seconds": None,
+                "is_stale": False,
+                "is_data_fresh": False,
+                "warnings": ["Breadth scanner has not run or no state file found."],
+                "message": "No breadth scanner state file found.",
+                "screening_strategy_counts": None,
+                "qualification_strategy_counts": None,
+            }
+
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Compute staleness based on updated_at or last_persistence_time
+            upd_str = data.get("updated_at") or data.get("last_persistence_time")
+            staleness_seconds = None
+            if upd_str:
+                try:
+                    dt = datetime.fromisoformat(upd_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    staleness_seconds = max(0.0, (now - dt).total_seconds())
+                except Exception:
+                    pass
+
+            is_stale = (
+                staleness_seconds is not None and staleness_seconds > max_stale_seconds
+            )
+            persisted_status = data.get("status", "STOPPED")
+
+            if is_proc_running:
+                status_label = persisted_status if persisted_status in ("RUNNING", "INITIALIZING", "ERROR") else "RUNNING"
+            else:
+                if persisted_status in ("STOPPED", "FAILED", "ERROR"):
+                    status_label = persisted_status
+                else:
+                    status_label = "STOPPED"
+
+            # Freshness rule: running, updated within threshold, and no process deadlocks
+            is_fresh = (
+                status_label == "RUNNING"
+                and not is_stale
+                and staleness_seconds is not None
+            )
+
+            warnings: List[str] = []
+            if not is_proc_running and status_label == "STOPPED":
+                warnings.append("Breadth scanner process is currently stopped.")
+            if is_stale:
+                warnings.append(
+                    f"Scanner telemetry is stale ({int(staleness_seconds or 0)}s old > {int(max_stale_seconds)}s limit). Old data is not live."
+                )
+
+            if data.get("total_cycles_count", 0) > 0 and not data.get("last_catalog_complete", True):
+                warnings.append("Latest catalog discovery was partial or incomplete.")
+
+            if data.get("is_currently_overrunning"):
+                warnings.append(
+                    f"Scanner cycle overran scheduled interval ({data.get('last_cycle_duration_seconds', 0):.1f}s > {data.get('scheduled_interval_seconds', 0):.1f}s)."
+                )
+
+            if data.get("queue_overflow_count", 0) > 0:
+                warnings.append(
+                    f"{data['queue_overflow_count']} candidate(s) dropped due to qualification queue overflow."
+                )
+
+            if data.get("api_failures_count", 0) > 0:
+                warnings.append(f"{data['api_failures_count']} order-book API request(s) failed.")
+
+            if data.get("rate_limit_events_count", 0) > 0:
+                warnings.append(f"{data['rate_limit_events_count']} rate limit event(s) encountered.")
+
+            if data.get("last_error"):
+                warnings.append(f"Last scanner error: {data['last_error']}")
+
+            # Strategy breakdown aggregation from persistent history records
+            strat_summary = self.get_breadth_scanner_strategy_breakdown(scanner_dir=base_dir)
+            has_records = strat_summary.get("has_candidate_records", False)
+            total_prelim = data.get("total_preliminary_candidates_generated", 0)
+
+            if has_records:
+                screening_counts = strat_summary["preliminary_by_strategy"]
+            elif total_prelim == 0:
+                screening_counts = {
+                    "binary_parity": 0,
+                    "mece_basket_long_yes": 0,
+                    "mece_basket_long_no": 0,
+                    "mece_long_yes": 0,
+                    "mece_long_no": 0,
+                    "crossed_book": 0,
+                    "total_unique": 0,
+                }
+            else:
+                # History file missing or empty but candidates were reported
+                screening_counts = None
+
+            res = dict(data)
+            res.update({
+                "status": status_label,
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "staleness_seconds": staleness_seconds,
+                "is_stale": is_stale,
+                "is_data_fresh": is_fresh,
+                "max_stale_seconds": max_stale_seconds,
+                "output_dir": str(base_dir),
+                "state_file": str(state_path),
+                "warnings": warnings,
+                "screening_strategy_counts": screening_counts,
+                "qualification_strategy_counts": strat_summary.get("qualification_by_strategy"),
+            })
+            return res
+        except Exception as exc:
+            logger.warning(f"Error loading breadth scanner state from {state_path}: {exc}")
+            return {
+                "status": "ERROR",
+                "process_running": is_proc_running,
+                "process_pid": proc_status.get("pid"),
+                "error": str(exc),
+                "state_file": str(state_path),
+                "staleness_seconds": None,
+                "is_stale": True,
+                "is_data_fresh": False,
+                "warnings": [f"Failed to parse scanner state file: {exc}"],
+                "screening_strategy_counts": None,
+                "qualification_strategy_counts": None,
+            }
+
+    def get_breadth_scanner_strategy_breakdown(
+        self,
+        scanner_dir: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """Aggregate unique preliminary candidates and qualification outcomes by strategy.
+
+        Reads candidate_history.jsonl and qualification_history.jsonl directly.
+        Deduplicates records by unique candidate key (candidate_id / stable_key) to avoid
+        double-counting repeated updates across cycles or quote snapshots.
+        """
+        base_dir = self._resolve_breadth_scanner_dir(scanner_dir)
+        cand_path = base_dir / "candidate_history.jsonl"
+        qual_path = base_dir / "qualification_history.jsonl"
+
+        prelim_counts: Dict[str, Any] = {
+            "binary_parity": 0,
+            "mece_basket_long_yes": 0,
+            "mece_basket_long_no": 0,
+            "crossed_book": 0,
+            "other": 0,
+            "total_unique": 0,
+        }
+        qual_by_strat: Dict[str, Any] = {
+            "binary_parity": {"qualified": 0, "rejected": 0, "outcomes": {}},
+            "mece_basket_long_yes": {"qualified": 0, "rejected": 0, "outcomes": {}},
+            "mece_basket_long_no": {"qualified": 0, "rejected": 0, "outcomes": {}},
+            "crossed_book": {"qualified": 0, "rejected": 0, "outcomes": {}},
+            "other": {"qualified": 0, "rejected": 0, "outcomes": {}},
+        }
+
+        has_cand_file = cand_path.exists()
+        has_qual_file = qual_path.exists()
+
+        if has_cand_file:
+            seen_cand_ids: Set[str] = set()
+            try:
+                with open(cand_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                            cand = record.get("candidate", record)
+                            cid = cand.get("candidate_id") or cand.get("stable_key")
+                            if not cid or cid in seen_cand_ids:
+                                continue
+                            seen_cand_ids.add(cid)
+
+                            strat = normalize_breadth_strategy_type(cand.get("strategy_type", ""))
+                            is_crossed = bool(cand.get("is_crossed_book_signal")) or (strat == "crossed_book")
+                            if is_crossed:
+                                prelim_counts["crossed_book"] += 1
+                            elif strat in prelim_counts:
+                                prelim_counts[strat] += 1
+                            else:
+                                prelim_counts["other"] += 1
+                            prelim_counts["total_unique"] += 1
+                        except Exception:
+                            pass
+            except Exception as exc:
+                logger.warning(f"Error reading candidate history for strategy breakdown: {exc}")
+
+        if has_qual_file:
+            seen_qual_ids: Set[str] = set()
+            try:
+                with open(qual_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                            qual = record.get("qualification", record)
+                            qid = qual.get("qualification_id") or qual.get("candidate_id") or qual.get("stable_key")
+                            if not qid or qid in seen_qual_ids:
+                                continue
+                            seen_qual_ids.add(qid)
+
+                            strat = normalize_breadth_strategy_type(qual.get("strategy_type", ""))
+                            target_strat = strat if strat in qual_by_strat else "other"
+                            is_qual = bool(qual.get("is_qualified", False))
+                            outcome = str(qual.get("outcome", "UNKNOWN"))
+
+                            if is_qual or outcome == "QUALIFIED":
+                                qual_by_strat[target_strat]["qualified"] += 1
+                            else:
+                                qual_by_strat[target_strat]["rejected"] += 1
+
+                            outcomes_dict = qual_by_strat[target_strat]["outcomes"]
+                            outcomes_dict[outcome] = outcomes_dict.get(outcome, 0) + 1
+                        except Exception:
+                            pass
+            except Exception as exc:
+                logger.warning(f"Error reading qualification history for strategy breakdown: {exc}")
+
+        # Also provide convenient UI-friendly aliases
+        prelim_counts["mece_long_yes"] = prelim_counts["mece_basket_long_yes"]
+        prelim_counts["mece_long_no"] = prelim_counts["mece_basket_long_no"]
+
+        return {
+            "has_candidate_records": has_cand_file,
+            "has_qualification_records": has_qual_file,
+            "preliminary_by_strategy": prelim_counts,
+            "qualification_by_strategy": qual_by_strat,
+        }
+
+    def get_breadth_scanner_summaries(
+        self,
+        scanner_dir: Optional[Union[str, Path]] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Return recent scan cycle summaries from scan_summaries.jsonl in reverse chronological order."""
+        base_dir = self._resolve_breadth_scanner_dir(scanner_dir)
+        path = base_dir / "scan_summaries.jsonl"
+        if not path.exists():
+            return []
+
+        summaries = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            record = json.loads(line)
+                            summaries.append(record)
+                        except Exception:
+                            pass
+            summaries.reverse()
+            return summaries[:limit]
+        except Exception as exc:
+            logger.warning(f"Error reading scan summaries from {path}: {exc}")
+            return []
+
+    def get_breadth_scanner_candidates(
+        self,
+        scanner_dir: Optional[Union[str, Path]] = None,
+        limit: int = 100,
+        strategy: Optional[str] = None,
+        cycle_number: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return recorded preliminary candidates from candidate_history.jsonl in reverse order."""
+        base_dir = self._resolve_breadth_scanner_dir(scanner_dir)
+        path = base_dir / "candidate_history.jsonl"
+        if not path.exists():
+            return []
+
+        candidates = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            record = json.loads(line)
+                            cand_data = record.get("candidate", record)
+                            rec_cycle = record.get("cycle_number")
+                            rec_time = record.get("recorded_at")
+
+                            cand_dict = dict(cand_data)
+                            if "cycle_number" not in cand_dict and rec_cycle is not None:
+                                cand_dict["cycle_number"] = rec_cycle
+                            if "recorded_at" not in cand_dict and rec_time is not None:
+                                cand_dict["recorded_at"] = rec_time
+
+                            strat_type = cand_dict.get("strategy_type", "")
+                            cand_dict["is_crossed_book_signal"] = (strat_type == "crossed_book")
+
+                            if strategy and strategy.upper() != "ALL":
+                                if normalize_breadth_strategy_type(strat_type) != normalize_breadth_strategy_type(strategy):
+                                    continue
+
+                            if cycle_number is not None and cand_dict.get("cycle_number") != cycle_number:
+                                continue
+
+                            candidates.append(cand_dict)
+                        except Exception:
+                            pass
+            candidates.reverse()
+            return candidates[:limit]
+        except Exception as exc:
+            logger.warning(f"Error reading candidate history from {path}: {exc}")
+            return []
+
+    def get_breadth_scanner_qualifications(
+        self,
+        scanner_dir: Optional[Union[str, Path]] = None,
+        limit: int = 100,
+        strategy: Optional[str] = None,
+        outcome: Optional[str] = None,
+        is_qualified: Optional[bool] = None,
+        cycle_number: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return recorded targeted order-book qualifications from qualification_history.jsonl in reverse order."""
+        base_dir = self._resolve_breadth_scanner_dir(scanner_dir)
+        path = base_dir / "qualification_history.jsonl"
+        if not path.exists():
+            return []
+
+        qualifications = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            record = json.loads(line)
+                            qual_data = record.get("qualification", record)
+                            rec_cycle = record.get("cycle_number")
+                            rec_time = record.get("recorded_at")
+
+                            qual_dict = dict(qual_data)
+                            if "cycle_number" not in qual_dict and rec_cycle is not None:
+                                qual_dict["cycle_number"] = rec_cycle
+                            if "recorded_at" not in qual_dict and rec_time is not None:
+                                qual_dict["recorded_at"] = rec_time
+
+                            strat = qual_dict.get("strategy_type", "")
+                            if strategy and strategy.upper() != "ALL":
+                                if normalize_breadth_strategy_type(strat) != normalize_breadth_strategy_type(strategy):
+                                    continue
+
+                            outc = qual_dict.get("outcome", "")
+                            if outcome and outcome.upper() != "ALL":
+                                if outc.upper() != outcome.upper():
+                                    continue
+
+                            if is_qualified is not None:
+                                if bool(qual_dict.get("is_qualified")) != is_qualified:
+                                    continue
+
+                            if cycle_number is not None and qual_dict.get("cycle_number") != cycle_number:
+                                continue
+
+                            qualifications.append(qual_dict)
+                        except Exception:
+                            pass
+            qualifications.reverse()
+            return qualifications[:limit]
+        except Exception as exc:
+            logger.warning(f"Error reading qualification history from {path}: {exc}")
+            return []

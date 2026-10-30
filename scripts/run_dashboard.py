@@ -33,6 +33,11 @@ def parse_args() -> argparse.Namespace:
         default=8080,
         help="Port to listen on (default: 8080; falls back to next available port if in use).",
     )
+    parser.add_argument(
+        "--scanner-dir",
+        default=None,
+        help="Path to breadth scanner data directory (default: data/breadth_scanner or KALSHI_SCANNER_DIR env var).",
+    )
     return parser.parse_args()
 
 
@@ -42,12 +47,15 @@ def main() -> int:
     print("=" * 64)
     print("KALSHI ARBITRAGE ENGINE — FRONTEND DASHBOARD V1 (READ-ONLY)")
     print(f"Binding Address: http://{args.host}:{args.port}")
+    if args.scanner_dir:
+        print(f"Scanner Directory: {args.scanner_dir}")
     print("=" * 64)
 
     server = create_dashboard_server(
         host=args.host,
         port=args.port,
         workspace_root=ROOT,
+        scanner_dir=args.scanner_dir,
     )
 
     def handle_signal(signum, frame):

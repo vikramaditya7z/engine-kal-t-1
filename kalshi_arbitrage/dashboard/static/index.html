@@ -3,63 +3,118 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kalshi Arbitrage Engine — Dashboard</title>
+  <title>Kalshi Arbitrage Engine — Live Monitoring & Research Dashboard</title>
   <link rel="stylesheet" href="/dashboard.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body class="theme-dark">
-  <!-- Header Bar -->
+  <!-- Top Navigation Bar -->
   <header class="top-nav">
     <div class="nav-brand">
       <div class="brand-titles">
         <h1 class="brand-name">Kalshi Arbitrage</h1>
-        <span class="brand-sub">Engine Dashboard</span>
+        <span class="brand-sub">Live Terminal V23</span>
       </div>
+      <!-- Data Provenance Badge -->
+      <span id="provenance-badge" class="provenance-tag tag-live" title="Current data source mode">LIVE PIPELINE</span>
     </div>
 
     <div class="nav-controls">
-      <!-- Dataset Picker -->
+      <!-- Data Source / Mode Switcher -->
       <div class="control-item">
+        <label for="mode-select" class="control-label">Mode</label>
+        <select id="mode-select" class="select-input" title="Switch between live stream and historical evidence">
+          <option value="live" selected>Live Pipeline (V20–V22)</option>
+          <option value="historical">Historical Evidence</option>
+        </select>
+      </div>
+
+      <!-- Dataset Picker (Visible in Historical Mode) -->
+      <div class="control-item hidden" id="dataset-picker-wrap">
         <label for="dataset-select" class="control-label">Dataset</label>
-        <select id="dataset-select" class="select-input" title="Select observation dataset">
+        <select id="dataset-select" class="select-input" title="Select recorded evidence dataset">
           <option value="" disabled selected>Loading...</option>
         </select>
       </div>
 
-      <!-- Compact Observer Status -->
-      <div id="observer-status-pill" class="status-indicator status-stopped" title="Host observer process status">
+      <!-- Compact Observer Status (Historical / System Indicator) -->
+      <div id="observer-status-pill" class="status-indicator status-stopped hidden" title="Host observer process status">
         <span class="status-dot"></span>
         <span id="observer-status-text" class="status-text">Stopped</span>
       </div>
 
       <!-- Compact Environment Tag -->
-      <span id="env-pill" class="env-badge">Demo</span>
+      <span id="env-pill" class="env-badge hidden">Demo</span>
 
-      <!-- Primary Action: Refresh -->
-      <button id="refresh-btn" class="btn btn-primary" title="Refresh metrics from disk">
-        <svg class="btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-        </svg>
-        Refresh
-      </button>
+      <!-- Collector Status Pill -->
+      <div id="collector-status-pill" class="status-indicator status-stopped" title="Continuous Collector Service Status">
+        <span class="status-dot"></span>
+        <span id="collector-status-text" class="status-text">Collector: Stopped</span>
+      </div>
 
-      <!-- Secondary Control: Auto-refresh -->
-      <label class="auto-refresh-control" title="Poll every 5 seconds">
-        <input type="checkbox" id="auto-refresh-toggle">
-        <span>Auto-refresh</span>
-      </label>
+      <!-- Evaluator Status Pill -->
+      <div id="evaluator-status-pill" class="status-indicator status-stopped" title="Continuous Evaluator & Qualification Service Status">
+        <span class="status-dot"></span>
+        <span id="evaluator-status-text" class="status-text">Evaluator: Stopped</span>
+      </div>
+
+      <!-- Alert Engine Status Pill -->
+      <div id="alert-status-pill" class="status-indicator status-stopped" title="Opportunity Alert & Delivery Engine Status">
+        <span class="status-dot"></span>
+        <span id="alert-status-text" class="status-text">Alerts: Stopped</span>
+      </div>
+
+      <!-- Breadth Scanner Status Pill -->
+      <div id="scanner-status-pill" class="status-indicator status-stopped" title="Breadth-First Scanner Service Status">
+        <span class="status-dot"></span>
+        <span id="scanner-status-text" class="status-text">Scanner: Stopped</span>
+      </div>
+
+      <!-- UI Refresh Controls -->
+      <div class="refresh-controls-group">
+        <button id="refresh-btn" class="btn btn-primary" title="Poll latest updates from backend">
+          <svg class="btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          Refresh
+        </button>
+
+        <label class="auto-refresh-control" title="Enable background polling">
+          <input type="checkbox" id="auto-refresh-toggle" checked>
+          <span>Auto</span>
+        </label>
+
+        <select id="refresh-interval-select" class="select-input-sm" title="Polling cadence">
+          <option value="2000">2s</option>
+          <option value="3000" selected>3s</option>
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+        </select>
+
+        <span id="last-ui-refresh" class="font-mono ui-refresh-caption" title="Last successful UI refresh time">UI: —</span>
+      </div>
     </div>
   </header>
+
+  <!-- Global Pipeline Alert / Warning Banner -->
+  <div id="pipeline-alert-banner" class="alert-banner banner-warning hidden">
+    <div class="alert-icon">⚠️</div>
+    <div class="alert-content" id="pipeline-alert-text">
+      Continuous live services are currently stopped. Displaying last persisted state.
+    </div>
+    <button id="alert-dismiss-btn" class="alert-close">&times;</button>
+  </div>
 
   <!-- Navigation Tabs -->
   <nav class="main-tabs">
     <div class="tabs-container">
-      <button class="tab-button active" data-tab="overview">Overview</button>
+      <button class="tab-button active" data-tab="overview">Live Overview</button>
+      <button class="tab-button" data-tab="candidates">Candidates & Rejections</button>
       <button class="tab-button" data-tab="markets">Market Monitoring</button>
-      <button class="tab-button" data-tab="opportunities">Opportunities</button>
-      <button class="tab-button" data-tab="historical">Historical Evidence</button>
+      <button class="tab-button" data-tab="breadth-scanner">Breadth Scanner</button>
+      <button class="tab-button" data-tab="historical">Historical & Replay</button>
       <button class="tab-button" data-tab="health">System Health</button>
     </div>
   </nav>
@@ -67,41 +122,116 @@
   <!-- Main View Area -->
   <main class="page-container">
 
-    <!-- TAB 1: OVERVIEW -->
+    <!-- TAB 1: LIVE OVERVIEW -->
     <section id="tab-overview" class="view-panel active">
-      <!-- 4 Primary Metrics -->
+      <!-- 6 Primary Live Metrics -->
       <div class="metrics-grid">
-        <div class="metric-card">
-          <div class="metric-label">Markets observed</div>
-          <div class="metric-value font-mono" id="kpi-markets-count">—</div>
-          <div class="metric-caption" id="kpi-events-count">Unique contracts in dataset</div>
+        <div class="metric-card" id="card-collector">
+          <div class="metric-header-row">
+            <span class="metric-label">Collector Status</span>
+            <span id="kpi-collector-badge" class="badge-status-pill badge-stopped">STOPPED</span>
+          </div>
+          <div class="metric-value font-mono" id="kpi-collector-markets">0</div>
+          <span id="kpi-markets-count" class="hidden">0</span>
+          <div class="metric-caption" id="kpi-collector-sub">Monitored live markets</div>
         </div>
 
-        <div class="metric-card">
-          <div class="metric-label">Observations</div>
-          <div class="metric-value font-mono" id="kpi-total-obs">—</div>
-          <div class="metric-caption" id="kpi-obs-span">Total recorded snapshots</div>
+        <div class="metric-card" id="card-evaluator">
+          <div class="metric-header-row">
+            <span class="metric-label">Evaluator Status</span>
+            <span id="kpi-evaluator-badge" class="badge-status-pill badge-stopped">STOPPED</span>
+          </div>
+          <div class="metric-value font-mono" id="kpi-evaluator-obs">0</div>
+          <span id="kpi-total-obs" class="hidden">0</span>
+          <div class="metric-caption" id="kpi-evaluator-sub">Evaluated observations</div>
         </div>
 
-        <div class="metric-card">
-          <div class="metric-label">Data freshness</div>
+        <div class="metric-card" id="card-freshness">
+          <div class="metric-header-row">
+            <span class="metric-label">Data Freshness</span>
+            <span id="kpi-freshness-pill" class="badge-status-pill badge-neutral">—</span>
+          </div>
           <div class="metric-value font-mono" id="kpi-freshness-age">—</div>
-          <div class="metric-caption" id="kpi-freshness-ts">Historical recorded evidence</div>
+          <div class="metric-caption" id="kpi-freshness-ts">Snapshot: None</div>
         </div>
 
         <div class="metric-card">
-          <div class="metric-label">Qualified opportunities</div>
-          <div class="metric-value font-mono" id="kpi-opps-qualified">0</div>
-          <div class="metric-caption" id="kpi-opps-sub">0 candidates detected</div>
+          <div class="metric-header-row">
+            <span class="metric-label">Active Candidates</span>
+          </div>
+          <div class="metric-value font-mono" id="kpi-active-candidates">0</div>
+          <div class="metric-caption" id="kpi-total-candidates">0 total detected in session</div>
+        </div>
+
+        <div class="metric-card highlight-card">
+          <div class="metric-header-row">
+            <span class="metric-label">Qualified Opportunities</span>
+            <span class="metric-badge-v22">V22 Verified</span>
+          </div>
+          <div class="metric-value font-mono text-accent" id="kpi-qualified-count">0</div>
+          <span id="kpi-opps-qualified" class="hidden">0</span>
+          <div class="metric-caption" id="kpi-qualified-sub">Execution & fee-supported</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header-row">
+            <span class="metric-label">Rejected Candidates</span>
+          </div>
+          <div class="metric-value font-mono text-muted" id="kpi-rejected-count">0</div>
+          <div class="metric-caption" id="kpi-rejected-sub">Depth, fee, or timing barriers</div>
         </div>
       </div>
 
-      <!-- Simplified Opportunity Breakdown -->
+      <!-- Live Execution-Qualified Opportunities Section -->
       <div class="content-panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">Opportunity breakdown</h2>
-            <p class="panel-subtitle">Qualification progression across order-book depth, fees, and freshness</p>
+            <h2 class="panel-title">Execution-Qualified Arbitrage Opportunities</h2>
+            <p class="panel-subtitle">Opportunities passing order-book depth traversal, multi-leg bottleneck sizing, and official CFTC quadratic taker fees</p>
+          </div>
+          <div class="panel-header-badges">
+            <span class="env-badge prod font-mono">Fail-Closed Verification</span>
+          </div>
+        </div>
+
+        <!-- Strict Execution Risk Notice -->
+        <div class="callout callout-subtle">
+          <span class="callout-tag">Execution Notice</span>
+          <span>Qualification is evaluated against resting limit orders at observation time. Does not guarantee live matching engine queue priority, fill speed, or non-atomic multi-leg fills. Strictly read-only research interface.</span>
+        </div>
+
+        <!-- Qualified Table Container -->
+        <div class="table-container" style="margin-top: 14px;">
+          <table class="data-table" id="qualified-table">
+            <thead>
+              <tr>
+                <th>Candidate ID</th>
+                <th>Strategy</th>
+                <th>Market(s)</th>
+                <th>Qty</th>
+                <th>Cost (VWAP)</th>
+                <th>Payout</th>
+                <th>Gross Edge</th>
+                <th>CFTC Fees</th>
+                <th>Net Profit</th>
+                <th>Return on Capital</th>
+                <th>Data Freshness</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="qualified-tbody">
+              <!-- Dynamically populated or empty state -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- V22 Qualification Funnel & Outcomes Breakdown -->
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Qualification Funnel & Rejection Breakdown</h2>
+            <p class="panel-subtitle">Transparent accounting of every candidate evaluated by the deterministic qualification engine</p>
           </div>
           <button id="toggle-funnel-btn" class="btn btn-ghost">Collapse</button>
         </div>
@@ -109,41 +239,204 @@
         <div id="funnel-breakdown-body">
           <div class="breakdown-grid">
             <div class="breakdown-item">
-              <span class="breakdown-num font-mono" id="funnel-raw">0</span>
-              <span class="breakdown-name">Raw observations</span>
+              <span class="breakdown-num font-mono" id="funnel-obs">0</span>
+              <span class="breakdown-name">Processed Obs</span>
             </div>
             <div class="breakdown-item">
-              <span class="breakdown-num font-mono" id="funnel-fresh">0</span>
-              <span class="breakdown-name">Fresh order books</span>
+              <span class="breakdown-num font-mono" id="funnel-detected">0</span>
+              <span class="breakdown-name">Detected Candidates</span>
             </div>
             <div class="breakdown-item">
-              <span class="breakdown-num font-mono" id="funnel-cand">0</span>
-              <span class="breakdown-name">Theoretical candidates</span>
+              <span class="breakdown-num font-mono" id="funnel-depth-rej">0</span>
+              <span class="breakdown-name">Rejected (Depth)</span>
             </div>
             <div class="breakdown-item">
-              <span class="breakdown-num font-mono" id="funnel-depth">0</span>
-              <span class="breakdown-name">Depth supported</span>
+              <span class="breakdown-num font-mono" id="funnel-fee-rej">0</span>
+              <span class="breakdown-name">Rejected (Fees)</span>
             </div>
             <div class="breakdown-item">
-              <span class="breakdown-num font-mono" id="funnel-net">0</span>
-              <span class="breakdown-name">Net profitable</span>
+              <span class="breakdown-num font-mono" id="funnel-edge-rej">0</span>
+              <span class="breakdown-name">Rejected (No Edge)</span>
+            </div>
+            <div class="breakdown-item">
+              <span class="breakdown-num font-mono" id="funnel-timing-rej">0</span>
+              <span class="breakdown-name">Rejected (Timing/Skew)</span>
             </div>
             <div class="breakdown-item highlight-item">
-              <span class="breakdown-num font-mono" id="funnel-qual">0</span>
+              <span class="breakdown-num font-mono" id="funnel-qualified">0</span>
               <span class="breakdown-name">Qualified</span>
             </div>
           </div>
 
-          <div class="breakdown-note">
-            All order books in this recording currently have 0 resting counterparty bids. To prevent execution without liquidity, the deterministic engine correctly rejects all trades (fail-closed integrity).
+          <div class="breakdown-note" id="funnel-summary-note">
+            In continuous trading conditions, resting counterparty bids are frequently absent on unhedged binary contracts, resulting in 0 available executable ask depth. The engine safely rejects these candidates (fail-closed integrity).
           </div>
         </div>
       </div>
     </section>
 
-    <!-- TAB 2: MARKET MONITORING -->
+    <!-- TAB 2: CANDIDATES & REJECTIONS -->
+    <section id="tab-candidates" class="view-panel">
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Continuous Candidate Monitoring & Rejection Analysis</h2>
+            <p class="panel-subtitle">Audit every candidate detected by the pipeline with explicit V22 qualification outcomes and rejection causes</p>
+          </div>
+        </div>
+
+        <!-- Filter Toolbar -->
+        <div class="toolbar">
+          <div class="search-wrap">
+            <input type="text" id="candidate-search" class="search-input" placeholder="Search by candidate ID or ticker...">
+          </div>
+
+          <div class="filter-controls-row">
+            <div class="control-item">
+              <label for="filter-strategy" class="control-label">Strategy</label>
+              <select id="filter-strategy" class="select-input">
+                <option value="ALL">All Strategies</option>
+                <option value="binary_parity">Binary Parity</option>
+                <option value="mece_basket_long_yes">MECE Basket Long YES</option>
+                <option value="mece_basket_long_no">MECE Basket Long NO</option>
+              </select>
+            </div>
+
+            <div class="control-item">
+              <label for="filter-outcome" class="control-label">Outcome</label>
+              <select id="filter-outcome" class="select-input">
+                <option value="ALL">All Outcomes</option>
+                <option value="QUALIFIED">QUALIFIED</option>
+                <option value="REJECTED_INSUFFICIENT_DEPTH">REJECTED_INSUFFICIENT_DEPTH</option>
+                <option value="REJECTED_UNPROFITABLE_FEES">REJECTED_UNPROFITABLE_FEES</option>
+                <option value="REJECTED_NO_GROSS_EDGE">REJECTED_NO_GROSS_EDGE</option>
+                <option value="REJECTED_STALE">REJECTED_STALE</option>
+                <option value="REJECTED_LEG_SKEW">REJECTED_LEG_SKEW</option>
+                <option value="REJECTED_MISSING_MARKET">REJECTED_MISSING_MARKET</option>
+                <option value="REJECTED_MISSING_TIMESTAMP">REJECTED_MISSING_TIMESTAMP</option>
+                <option value="INCONCLUSIVE">INCONCLUSIVE</option>
+              </select>
+            </div>
+
+            <div class="control-item">
+              <label for="filter-state" class="control-label">State</label>
+              <select id="filter-state" class="select-input">
+                <option value="ALL">All States</option>
+                <option value="NEW">NEW</option>
+                <option value="UPDATED">UPDATED</option>
+                <option value="INVALIDATED">INVALIDATED</option>
+                <option value="DISQUALIFIED">DISQUALIFIED</option>
+                <option value="DISAPPEARED">DISAPPEARED</option>
+              </select>
+            </div>
+
+            <div class="control-item">
+              <label class="auto-refresh-control">
+                <input type="checkbox" id="filter-only-qualified">
+                <span>Qualified Only</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- All Candidates Table -->
+        <div class="table-container">
+          <table class="data-table" id="candidates-table">
+            <thead>
+              <tr>
+                <th>Candidate ID</th>
+                <th>Strategy</th>
+                <th>State</th>
+                <th>Outcome</th>
+                <th>Market(s)</th>
+                <th>Qty</th>
+                <th>Gross</th>
+                <th>Net</th>
+                <th>Rejection / Invalidation Reason</th>
+                <th>Evaluated</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="candidates-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Candidate Transition History Sub-Panel -->
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h3 class="panel-title">Candidate Lifecycle Transition History</h3>
+            <p class="panel-subtitle">Append-only audit trail of candidate detections, updates, invalidations, and disqualifications</p>
+          </div>
+          <button id="toggle-history-btn" class="btn btn-ghost">Collapse</button>
+        </div>
+
+        <div id="history-container">
+          <div class="table-container">
+            <table class="data-table" id="history-table">
+              <thead>
+                <tr>
+                  <th>Time (UTC)</th>
+                  <th>Candidate ID</th>
+                  <th>Transition</th>
+                  <th>Outcome</th>
+                  <th>Edge (Gross / Net)</th>
+                  <th>Reason / Details</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Opportunity Alerts Stream (V24) -->
+      <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h3 class="panel-title">Qualified Opportunity Alerts Log (V24)</h3>
+            <p class="panel-subtitle">Auditable record of execution-qualified alerts, material changes, and invalidation dispatches</p>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="alerts-table">
+            <thead>
+              <tr>
+                <th>Alert ID</th>
+                <th>Event Type</th>
+                <th>Candidate ID</th>
+                <th>Net Profit</th>
+                <th>Executable Qty</th>
+                <th>Message</th>
+                <th>Time (UTC)</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-tbody">
+              <tr>
+                <td colspan="7" class="table-empty">No opportunity alerts emitted yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: MARKET MONITORING -->
     <section id="tab-markets" class="view-panel">
       <div class="content-panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Market Order Book Monitoring</h2>
+            <p class="panel-subtitle">Point-in-time order book quotes, counterparty bids, and available liquidity</p>
+          </div>
+        </div>
+
         <div class="toolbar">
           <div class="search-wrap">
             <input type="text" id="market-search" class="search-input" placeholder="Search markets by ticker or title...">
@@ -178,61 +471,30 @@
       </div>
     </section>
 
-    <!-- TAB 3: OPPORTUNITIES -->
-    <section id="tab-opportunities" class="view-panel">
+    <!-- TAB 4: HISTORICAL & REPLAY -->
+    <section id="tab-historical" class="view-panel">
+      <!-- Historical Mode Banner -->
+      <div class="callout callout-amber" style="margin-bottom: 20px;">
+        <span class="callout-tag">Historical Evidence Mode</span>
+        <span>Viewing previously recorded research trial datasets. These records reflect point-in-time historical recordings and do NOT represent current live market opportunities.</span>
+      </div>
+
       <div class="content-panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">Arbitrage opportunities</h2>
-            <p class="panel-subtitle">Single-market binary parity and MECE event baskets</p>
+            <h2 class="panel-title">Historical Evidence & Audit Analysis</h2>
+            <p class="panel-subtitle">V7 provenance auditing, cadence analysis, and empirical evaluation</p>
           </div>
           <div class="segmented-control">
-            <button id="btn-opp-real" class="segment-btn active">Real evidence</button>
-            <button id="btn-opp-sim" class="segment-btn">Simulation demo</button>
+            <button id="btn-opp-real" class="segment-btn active">Dataset Replay</button>
+            <button id="btn-opp-sim" class="segment-btn">Simulation Demo</button>
           </div>
         </div>
 
         <!-- Simulated Disclaimer Callout -->
-        <div id="simulated-warning-banner" class="callout callout-amber hidden">
+        <div id="simulated-warning-banner" class="callout callout-amber hidden" style="margin-bottom: 16px;">
           <span class="callout-tag">Simulation Demo</span>
           <span>Viewing synthetic records for UI layout testing. These records do not represent real market activity or live execution.</span>
-        </div>
-
-        <!-- Opportunities Content -->
-        <div id="opportunities-content">
-          <div class="table-container">
-            <table class="data-table" id="opportunities-table">
-              <thead>
-                <tr>
-                  <th>Opportunity</th>
-                  <th>Strategy</th>
-                  <th>Status</th>
-                  <th>Payout</th>
-                  <th>Cost</th>
-                  <th>Gross edge</th>
-                  <th>Depth</th>
-                  <th>Fee</th>
-                  <th>Net edge</th>
-                  <th>Reason / Notes</th>
-                </tr>
-              </thead>
-              <tbody id="opportunities-tbody">
-                <!-- Dynamically populated -->
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 4: HISTORICAL EVIDENCE -->
-    <section id="tab-historical" class="view-panel">
-      <div class="content-panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">Historical evidence & audit</h2>
-            <p class="panel-subtitle">V7 provenance auditing, cadence analysis, and empirical evaluation</p>
-          </div>
         </div>
 
         <!-- Summary Grid -->
@@ -242,7 +504,7 @@
             <div class="summary-row"><span class="summary-key">Total records:</span><span class="summary-val font-mono" id="aud-total">0</span></div>
             <div class="summary-row"><span class="summary-key">Valid observations:</span><span class="summary-val font-mono" id="aud-valid">0</span></div>
             <div class="summary-row"><span class="summary-key">Freshness pass rate:</span><span class="summary-val font-mono" id="aud-fresh-rate">100.0%</span></div>
-            <div class="summary-row"><span class="summary-key">Empty order books:</span><span class="summary-val font-mono" id="aud-empty">44 (100%)</span></div>
+            <div class="summary-row"><span class="summary-key">Empty order books:</span><span class="summary-val font-mono" id="aud-empty">0 (0%)</span></div>
             <div class="summary-row"><span class="summary-key">Cumulative bid depth:</span><span class="summary-val font-mono" id="aud-depth">0 contracts</span></div>
           </div>
 
@@ -258,10 +520,10 @@
           <div class="summary-card">
             <h3 class="summary-card-title">Model assumptions</h3>
             <div class="summary-row"><span class="summary-key">Target quantity:</span><span class="summary-val font-mono">1 contract</span></div>
-            <div class="summary-row"><span class="summary-key">Exchange fee / contract:</span><span class="summary-val font-mono">1¢</span></div>
+            <div class="summary-row"><span class="summary-key">Fee schedule:</span><span class="summary-val font-mono">CFTC Quadratic Taker</span></div>
             <div class="summary-row"><span class="summary-key">Slippage haircut:</span><span class="summary-val font-mono">0¢</span></div>
             <div class="summary-row"><span class="summary-key">Max stale tolerance:</span><span class="summary-val font-mono">60.0s</span></div>
-            <div class="summary-row"><span class="summary-key">Net profitability check:</span><span class="summary-val">Enforced</span></div>
+            <div class="summary-row"><span class="summary-key">Net profitability check:</span><span class="summary-val">Enforced (fail-closed)</span></div>
           </div>
         </div>
 
@@ -279,38 +541,322 @@
       </div>
     </section>
 
+    <!-- TAB 4: BREADTH-FIRST SCANNER (PHASE 2E) -->
+    <section id="tab-breadth-scanner" class="view-panel">
+      <!-- Breadth Scanner Alert Banners -->
+      <div id="bscan-stale-banner" class="alert-banner banner-warning hidden" style="margin-bottom: 12px;">
+        <div class="alert-icon">⚠️</div>
+        <div class="alert-content" id="bscan-stale-text">
+          Breadth scanner telemetry is stale (>60s old). Displaying historical state. Old data is not live.
+        </div>
+      </div>
+
+      <div id="bscan-incomplete-banner" class="alert-banner banner-warning hidden" style="margin-bottom: 12px;">
+        <div class="alert-icon">⚠️</div>
+        <div class="alert-content" id="bscan-incomplete-text">
+          Catalog Discovery Warning: Latest discovery pass was partial or incomplete.
+        </div>
+      </div>
+
+      <div id="bscan-error-banner" class="alert-banner banner-error hidden" style="margin-bottom: 12px;">
+        <div class="alert-icon">❌</div>
+        <div class="alert-content" id="bscan-error-text">
+          Scanner Operational Error: —
+        </div>
+      </div>
+
+      <div id="bscan-stopped-banner" class="alert-banner banner-neutral hidden" style="margin-bottom: 12px;">
+        <div class="alert-icon">ℹ️</div>
+        <div class="alert-content" id="bscan-stopped-text">
+          Breadth Scanner daemon is currently stopped. Displaying last persisted state.
+        </div>
+      </div>
+
+      <!-- 6 Primary Breadth Metrics Cards -->
+      <div class="metrics-grid">
+        <div class="metric-card" id="card-bscan-coverage">
+          <div class="metric-header-row">
+            <span class="metric-label">Universe Coverage</span>
+            <span id="bscan-coverage-badge" class="badge-status-pill badge-neutral">CUMULATIVE</span>
+          </div>
+          <div class="metric-value font-mono">
+            <span id="bscan-kpi-disc">0</span> <span style="font-size: 16px; color: var(--text-muted);">/</span> <span id="bscan-kpi-screen">0</span>
+          </div>
+          <div class="metric-caption" id="bscan-coverage-sub">Unique Discovered / Screened</div>
+        </div>
+
+        <div class="metric-card" id="card-bscan-cycle">
+          <div class="metric-header-row">
+            <span class="metric-label">Latest Cycle Scan</span>
+            <span id="bscan-cycle-badge" class="badge-status-pill badge-neutral">CYCLE #0</span>
+          </div>
+          <div class="metric-value font-mono">
+            <span id="bscan-kpi-cycle-screen">0</span> <span style="font-size: 14px; color: var(--text-muted); font-weight: 400;">markets</span>
+          </div>
+          <div class="metric-caption" id="bscan-cycle-sub">New: 0 &bull; Changed: 0 &bull; Closed: 0</div>
+        </div>
+
+        <div class="metric-card" id="card-bscan-catalog">
+          <div class="metric-header-row">
+            <span class="metric-label">Catalog Discovery</span>
+            <span id="bscan-catalog-pill" class="badge-status-pill badge-neutral">—</span>
+          </div>
+          <div class="metric-value font-mono" id="bscan-catalog-status">—</div>
+          <div class="metric-caption" id="bscan-last-discovery-time">Last refresh: —</div>
+        </div>
+
+        <div class="metric-card" id="card-bscan-health">
+          <div class="metric-header-row">
+            <span class="metric-label">Scanner Health</span>
+            <span id="bscan-health-pill" class="badge-status-pill badge-stopped">STOPPED</span>
+          </div>
+          <div class="metric-value font-mono" id="bscan-health-status">STOPPED</div>
+          <div class="metric-caption" id="bscan-health-sub">0 cycles (0s avg duration)</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header-row">
+            <span class="metric-label">Preliminary Signals</span>
+            <span class="badge-status-pill badge-neutral">UNVERIFIED</span>
+          </div>
+          <div class="metric-value font-mono text-accent" id="bscan-kpi-prelim">0</div>
+          <div class="metric-caption" id="bscan-prelim-sub">Top-of-book candidates detected</div>
+        </div>
+
+        <div class="metric-card highlight-card">
+          <div class="metric-header-row">
+            <span class="metric-label">Execution-Qualified</span>
+            <span class="metric-badge-v22">V22 VERIFIED</span>
+          </div>
+          <div class="metric-value font-mono text-accent" id="bscan-kpi-qual">0</div>
+          <div class="metric-caption" id="bscan-qual-sub">Order-book depth & net profit verified</div>
+        </div>
+      </div>
+
+      <!-- Telemetry Breakdown Panels (3 Column Grid) -->
+      <div class="health-summary-grid" style="margin-top: 14px;">
+        <!-- Panel 1: Screening Strategies Breakdown -->
+        <div class="summary-card">
+          <h3 class="summary-card-title">Screening Strategies Breakdown</h3>
+          <div class="summary-row"><span class="summary-key">Binary Parity:</span><span class="summary-val font-mono"><span id="bscan-strat-bp">0</span> <span class="text-muted text-xs" id="bscan-strat-bp-sub"></span></span></div>
+          <div class="summary-row"><span class="summary-key">MECE Long YES:</span><span class="summary-val font-mono"><span id="bscan-strat-ly">0</span> <span class="text-muted text-xs" id="bscan-strat-ly-sub"></span></span></div>
+          <div class="summary-row"><span class="summary-key">MECE Long NO:</span><span class="summary-val font-mono"><span id="bscan-strat-ln">0</span> <span class="text-muted text-xs" id="bscan-strat-ln-sub"></span></span></div>
+          <div class="summary-row"><span class="summary-key">Crossed / Inverted Books:</span><span class="summary-val font-mono"><span id="bscan-strat-cb">0</span> <span class="badge-signal-only">Signal Only</span></span></div>
+          <div class="summary-row"><span class="summary-key">Deduplicated Across Cycles:</span><span class="summary-val font-mono" id="bscan-strat-dedup">0</span></div>
+          <div class="summary-row"><span class="summary-key">Pending Qualification Queue:</span><span class="summary-val font-mono" id="bscan-strat-pending">0</span></div>
+        </div>
+
+        <!-- Panel 2: Targeted Qualification & Rejections Breakdown -->
+        <div class="summary-card">
+          <h3 class="summary-card-title">Order-Book Qualification & Rejections</h3>
+          <div class="summary-row"><span class="summary-key">Qualified (Net Profitable):</span><span class="summary-val font-mono text-accent" id="bscan-tqual-qual">0</span></div>
+          <div class="summary-row"><span class="summary-key">Rejected — Stale Quotes:</span><span class="summary-val font-mono" id="bscan-rej-stale">0</span></div>
+          <div class="summary-row"><span class="summary-key">Rejected — Fee Deficit / Unprofitable:</span><span class="summary-val font-mono" id="bscan-rej-fees">0</span></div>
+          <div class="summary-row"><span class="summary-key">Rejected — Insufficient Book Depth:</span><span class="summary-val font-mono" id="bscan-rej-depth">0</span></div>
+          <div class="summary-row"><span class="summary-key">Rejected — Leg Skew / Non-Canonical:</span><span class="summary-val font-mono" id="bscan-rej-skew">0</span></div>
+          <div class="summary-row"><span class="summary-key">Rejected — Empty Book / Missing:</span><span class="summary-val font-mono" id="bscan-rej-empty">0</span></div>
+          <div class="summary-row"><span class="summary-key">Rejected — Unsupported / Invalid:</span><span class="summary-val font-mono" id="bscan-rej-unsupported">0</span></div>
+          <div class="summary-row"><span class="summary-key">Queue Overflow Drops:</span><span class="summary-val font-mono text-muted" id="bscan-rej-overflow">0</span></div>
+        </div>
+
+        <!-- Panel 3: Operational & Network Telemetry -->
+        <div class="summary-card">
+          <h3 class="summary-card-title">API & Operational Telemetry</h3>
+          <div class="summary-row"><span class="summary-key">Targeted OB Requests:</span><span class="summary-val font-mono" id="bscan-api-req">0</span></div>
+          <div class="summary-row"><span class="summary-key">API Failures / Errors:</span><span class="summary-val font-mono" id="bscan-api-fail">0</span></div>
+          <div class="summary-row"><span class="summary-key">API Retries:</span><span class="summary-val font-mono" id="bscan-api-retries">0</span></div>
+          <div class="summary-row"><span class="summary-key">Rate Limit Encounters (429):</span><span class="summary-val font-mono" id="bscan-api-ratelimit">0</span></div>
+          <div class="summary-row"><span class="summary-key">Last Cycle Duration:</span><span class="summary-val font-mono" id="bscan-last-duration">—</span></div>
+          <div class="summary-row"><span class="summary-key">Data Freshness:</span><span class="summary-val font-mono" id="bscan-freshness-val">—</span></div>
+          <div class="summary-row"><span class="summary-key">Session ID:</span><span class="summary-val font-mono" id="bscan-session-id">—</span></div>
+        </div>
+      </div>
+
+      <!-- Table 1: Targeted Qualification & Preliminary Candidates -->
+      <div class="content-panel" style="margin-top: 14px;">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Targeted Qualification Results & Preliminary Signals</h2>
+            <p class="panel-subtitle">Audited record of screened candidates, order-book qualification outcomes, gross/net margins, and rejection reasons</p>
+          </div>
+          <div class="filters-row">
+            <div class="filter-group">
+              <label for="bscan-filter-strat" class="filter-label">Strategy</label>
+              <select id="bscan-filter-strat" class="select-input-sm">
+                <option value="ALL" selected>All Strategies</option>
+                <option value="mece_basket_long_yes">MECE Long YES</option>
+                <option value="mece_basket_long_no">MECE Long NO</option>
+                <option value="binary_parity">Binary Parity</option>
+                <option value="crossed_book">Crossed Book (Signals)</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label for="bscan-filter-outcome" class="filter-label">Outcome</label>
+              <select id="bscan-filter-outcome" class="select-input-sm">
+                <option value="ALL" selected>All Outcomes</option>
+                <option value="QUALIFIED">Qualified Only</option>
+                <option value="REJECTED_LEG_SKEW">Rejected: Leg Skew</option>
+                <option value="REJECTED_UNPROFITABLE_FEES">Rejected: Fee Deficit</option>
+                <option value="REJECTED_INSUFFICIENT_DEPTH">Rejected: Depth</option>
+                <option value="REJECTED_STALE">Rejected: Stale</option>
+                <option value="REJECTED_UNSUPPORTED">Rejected: Unsupported</option>
+                <option value="PRELIMINARY">Preliminary Signals Only</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="bscan-candidates-table">
+            <thead>
+              <tr>
+                <th style="min-width: 90px;">Recorded (UTC)</th>
+                <th style="min-width: 60px;">Cycle</th>
+                <th style="min-width: 110px;">Strategy</th>
+                <th style="min-width: 250px; max-width: 380px;">Market / Event</th>
+                <th style="min-width: 120px;">Type & Status</th>
+                <th style="min-width: 80px;">Gross Edge</th>
+                <th style="min-width: 80px;">Est. Fees</th>
+                <th style="min-width: 80px;">Net Edge</th>
+                <th style="min-width: 70px;">Exec Qty</th>
+                <th style="min-width: 200px;">Outcome / Rejection Reason</th>
+              </tr>
+            </thead>
+            <tbody id="bscan-candidates-tbody">
+              <tr>
+                <td colspan="10" class="text-center text-muted" style="padding: 24px;">No candidates or qualifications recorded yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Table 2: Scan Cycle History -->
+      <div class="content-panel" style="margin-top: 14px;">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Scan Cycle History</h2>
+            <p class="panel-subtitle">Log of continuous breadth discovery and screening cycles</p>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="bscan-cycles-table">
+            <thead>
+              <tr>
+                <th>Cycle #</th>
+                <th>Completed (UTC)</th>
+                <th>Duration</th>
+                <th>Catalog State</th>
+                <th>Discovered</th>
+                <th>Eligible</th>
+                <th>Screened</th>
+                <th>Prelim Generated</th>
+                <th>Qualified</th>
+                <th>Rejected</th>
+                <th>API Req / Err</th>
+              </tr>
+            </thead>
+            <tbody id="bscan-cycles-tbody">
+              <tr>
+                <td colspan="11" class="text-center text-muted" style="padding: 24px;">No scan cycles completed yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- TAB 5: SYSTEM HEALTH -->
     <section id="tab-health" class="view-panel">
       <div class="content-panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">System diagnostics & health</h2>
-            <p class="panel-subtitle">Process monitoring, storage durability, and operational warnings</p>
+            <h2 class="panel-title">Pipeline Diagnostics & Infrastructure Health</h2>
+            <p class="panel-subtitle">Real-time health telemetry across live collector, evaluator, qualification engine, and storage</p>
           </div>
         </div>
 
         <div class="health-summary-grid">
+          <!-- Continuous Collector (V20) Card -->
           <div class="summary-card">
-            <h3 class="summary-card-title">Observer process</h3>
-            <div class="summary-row"><span class="summary-key">Status:</span><span class="summary-val font-mono" id="hlth-status">—</span></div>
-            <div class="summary-row"><span class="summary-key">Process ID (PID):</span><span class="summary-val font-mono" id="hlth-pid">—</span></div>
-            <div class="summary-row"><span class="summary-key">Environment:</span><span class="summary-val" id="hlth-env">—</span></div>
-            <div class="summary-row"><span class="summary-key">Last checked:</span><span class="summary-val font-mono" id="hlth-checked">—</span></div>
-            <div class="summary-row"><span class="summary-key">Active command:</span><span class="summary-val font-mono" id="hlth-cmd">—</span></div>
+            <h3 class="summary-card-title">Continuous Collector (V20)</h3>
+            <div class="summary-row"><span class="summary-key">Service Status:</span><span class="summary-val font-mono" id="hlth-coll-status">—</span></div>
+            <div class="summary-row"><span class="summary-key">Process Running:</span><span class="summary-val font-mono" id="hlth-coll-proc">—</span></div>
+            <div class="summary-row"><span class="summary-key">Process ID (PID):</span><span class="summary-val font-mono" id="hlth-coll-pid">—</span></div>
+            <div class="summary-row"><span class="summary-key">Session ID:</span><span class="summary-val font-mono" id="hlth-coll-session">—</span></div>
+            <div class="summary-row"><span class="summary-key">Last Collection:</span><span class="summary-val font-mono" id="hlth-coll-last-time">—</span></div>
+            <div class="summary-row"><span class="summary-key">Latest Snapshot Age:</span><span class="summary-val font-mono" id="hlth-coll-age">—</span></div>
+            <div class="summary-row"><span class="summary-key">Data Freshness:</span><span class="summary-val" id="hlth-coll-fresh">—</span></div>
+            <div class="summary-row"><span class="summary-key">Monitored Markets:</span><span class="summary-val font-mono" id="hlth-coll-markets">0</span></div>
+            <div class="summary-row"><span class="summary-key">Total Cycles:</span><span class="summary-val font-mono" id="hlth-coll-cycles">0 (0 success / 0 fail)</span></div>
+            <div class="summary-row"><span class="summary-key">Rate Limit Events:</span><span class="summary-val font-mono" id="hlth-coll-ratelimits">0</span></div>
+            <div class="summary-row"><span class="summary-key">Last Error:</span><span class="summary-val text-muted" id="hlth-coll-error">None</span></div>
           </div>
 
+          <!-- Continuous Evaluator (V21) Card -->
           <div class="summary-card">
-            <h3 class="summary-card-title">Paper trading runtime (V9)</h3>
-            <div class="summary-row"><span class="summary-key">Execution mode:</span><span class="summary-val font-mono" id="hlth-paper-mode">PAPER (Simulated)</span></div>
-            <div class="summary-row"><span class="summary-key">Runtime status:</span><span class="summary-val font-mono" id="hlth-paper-status">—</span></div>
-            <div class="summary-row"><span class="summary-key">Session ID:</span><span class="summary-val font-mono" id="hlth-paper-session">—</span></div>
-            <div class="summary-row"><span class="summary-key">Available cash:</span><span class="summary-val font-mono" id="hlth-paper-cash">—</span></div>
-            <div class="summary-row"><span class="summary-key">Book equity:</span><span class="summary-val font-mono" id="hlth-paper-equity">—</span></div>
-            <div class="summary-row"><span class="summary-key">Simulated trades:</span><span class="summary-val font-mono" id="hlth-paper-trades">—</span></div>
+            <h3 class="summary-card-title">Continuous Evaluator (V21)</h3>
+            <div class="summary-row"><span class="summary-key">Service Status:</span><span class="summary-val font-mono" id="hlth-eval-status">—</span></div>
+            <div class="summary-row"><span class="summary-key">Process Running:</span><span class="summary-val font-mono" id="hlth-eval-proc">—</span></div>
+            <div class="summary-row"><span class="summary-key">Process ID (PID):</span><span class="summary-val font-mono" id="hlth-eval-pid">—</span></div>
+            <div class="summary-row"><span class="summary-key">Session ID:</span><span class="summary-val font-mono" id="hlth-eval-session">—</span></div>
+            <div class="summary-row"><span class="summary-key">Last Evaluation:</span><span class="summary-val font-mono" id="hlth-eval-last-time">—</span></div>
+            <div class="summary-row"><span class="summary-key">Evaluations Count:</span><span class="summary-val font-mono" id="hlth-eval-cycles">0</span></div>
+            <div class="summary-row"><span class="summary-key">Processed Observations:</span><span class="summary-val font-mono" id="hlth-eval-obs">0</span></div>
+            <div class="summary-row"><span class="summary-key">Active Candidates:</span><span class="summary-val font-mono" id="hlth-eval-active">0</span></div>
+            <div class="summary-row"><span class="summary-key">Total Detected:</span><span class="summary-val font-mono" id="hlth-eval-total">0</span></div>
+            <div class="summary-row"><span class="summary-key">Transitions Logged:</span><span class="summary-val font-mono" id="hlth-eval-trans">0</span></div>
+            <div class="summary-row"><span class="summary-key">Last Error:</span><span class="summary-val text-muted" id="hlth-eval-error">None</span></div>
           </div>
 
+          <!-- Execution Qualification (V22) Card -->
           <div class="summary-card">
-            <h3 class="summary-card-title">Storage diagnostics</h3>
+            <h3 class="summary-card-title">Execution Qualification (V22)</h3>
+            <div class="summary-row"><span class="summary-key">Engine Model:</span><span class="summary-val font-mono">Multi-Level VWAP & Bottleneck</span></div>
+            <div class="summary-row"><span class="summary-key">Fee Schedule:</span><span class="summary-val font-mono">CFTC Quadratic Taker (per leg)</span></div>
+            <div class="summary-row"><span class="summary-key">Target Quantity:</span><span class="summary-val font-mono" id="hlth-qual-target-qty">—</span></div>
+            <div class="summary-row"><span class="summary-key">Require Full Depth:</span><span class="summary-val font-mono" id="hlth-qual-require-full">—</span></div>
+            <div class="summary-row"><span class="summary-key">Min Net Profit:</span><span class="summary-val font-mono" id="hlth-qual-min-profit">1¢</span></div>
+            <div class="summary-row"><span class="summary-key">Qualified Count:</span><span class="summary-val font-mono text-accent" id="hlth-qual-count">0</span></div>
+            <div class="summary-row"><span class="summary-key">Rejected Count:</span><span class="summary-val font-mono" id="hlth-qual-rej-count">0</span></div>
+            <div class="summary-row"><span class="summary-key">Top Rejection Cause:</span><span class="summary-val" id="hlth-qual-top-cause">—</span></div>
+            <div class="summary-row"><span class="summary-key">Fail-Closed Guarantee:</span><span class="summary-val text-accent">Active (Zero Hallucinated Fills)</span></div>
+          </div>
+
+          <!-- Alert & Delivery Engine (V24) Card -->
+          <div class="summary-card">
+            <h3 class="summary-card-title">Alert & Delivery Engine (V24)</h3>
+            <div class="summary-row"><span class="summary-key">Service Status:</span><span class="summary-val font-mono" id="hlth-alert-status">—</span></div>
+            <div class="summary-row"><span class="summary-key">Enabled Channels:</span><span class="summary-val font-mono" id="hlth-alert-channels">local_history</span></div>
+            <div class="summary-row"><span class="summary-key">Alerts Created:</span><span class="summary-val font-mono text-accent" id="hlth-alert-created">0</span></div>
+            <div class="summary-row"><span class="summary-key">Alerts Delivered:</span><span class="summary-val font-mono" id="hlth-alert-delivered">0</span></div>
+            <div class="summary-row"><span class="summary-key">Alerts Failed:</span><span class="summary-val font-mono" id="hlth-alert-failed">0</span></div>
+            <div class="summary-row"><span class="summary-key">Pending Queue Depth:</span><span class="summary-val font-mono" id="hlth-alert-queue">0</span></div>
+            <div class="summary-row"><span class="summary-key">Last Alert Time:</span><span class="summary-val font-mono" id="hlth-alert-last-time">—</span></div>
+            <div class="summary-row"><span class="summary-key">Last Delivery Time:</span><span class="summary-val font-mono" id="hlth-alert-last-delivery">—</span></div>
+            <div class="summary-row"><span class="summary-key">Tracked Candidates:</span><span class="summary-val font-mono" id="hlth-alert-tracked">0</span></div>
+            <div class="summary-row"><span class="summary-key">Secret Redaction:</span><span class="summary-val text-accent">Active (Tokens Masked)</span></div>
+          </div>
+
+          <!-- Breadth Scanner (Phase 2A–2D) Card -->
+          <div class="summary-card">
+            <h3 class="summary-card-title">Breadth Scanner Engine (Phase 2)</h3>
+            <div class="summary-row"><span class="summary-key">Service Status:</span><span class="summary-val font-mono" id="hlth-bscan-status">—</span></div>
+            <div class="summary-row"><span class="summary-key">Process Running:</span><span class="summary-val font-mono" id="hlth-bscan-proc">—</span></div>
+            <div class="summary-row"><span class="summary-key">Session ID:</span><span class="summary-val font-mono" id="hlth-bscan-session">—</span></div>
+            <div class="summary-row"><span class="summary-key">Catalog Completeness:</span><span class="summary-val font-mono" id="hlth-bscan-catalog">—</span></div>
+            <div class="summary-row"><span class="summary-key">Unique Discovered / Screened:</span><span class="summary-val font-mono" id="hlth-bscan-markets">0 / 0</span></div>
+            <div class="summary-row"><span class="summary-key">Completed Cycles:</span><span class="summary-val font-mono" id="hlth-bscan-cycles">0</span></div>
+            <div class="summary-row"><span class="summary-key">Preliminary Signals:</span><span class="summary-val font-mono text-accent" id="hlth-bscan-prelim">0</span></div>
+            <div class="summary-row"><span class="summary-key">Qualified Opportunities:</span><span class="summary-val font-mono text-accent" id="hlth-bscan-qual">0</span></div>
+            <div class="summary-row"><span class="summary-key">Queue Depth / Overflow:</span><span class="summary-val font-mono" id="hlth-bscan-queue">0 / 0</span></div>
+            <div class="summary-row"><span class="summary-key">Data Freshness / Staleness:</span><span class="summary-val font-mono" id="hlth-bscan-freshness">—</span></div>
+          </div>
+
+          <!-- Storage Diagnostics Card -->
+          <div class="summary-card">
+            <h3 class="summary-card-title">Storage & Environment</h3>
             <div class="summary-row"><span class="summary-key">Workspace root:</span><span class="summary-val font-mono" id="hlth-workspace">—</span></div>
             <div class="summary-row"><span class="summary-key">Discovered datasets:</span><span class="summary-val font-mono" id="hlth-dataset-count">0</span></div>
             <div class="summary-row"><span class="summary-key">Total records:</span><span class="summary-val font-mono" id="hlth-total-records">0</span></div>
@@ -320,15 +866,28 @@
         </div>
 
         <div class="notices-card">
-          <h3 class="notices-title">Operational notices</h3>
+          <h3 class="notices-title">Pipeline Operational Warnings & Errors</h3>
           <ul id="warnings-list" class="notices-list">
-            <li>All system diagnostics normal.</li>
+            <li>Checking pipeline health...</li>
           </ul>
         </div>
       </div>
     </section>
 
   </main>
+
+  <!-- Candidate Details Modal -->
+  <div id="candidate-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-candidate-id">Candidate Execution Details</h3>
+        <button id="modal-cand-close-btn" class="modal-close-button">&times;</button>
+      </div>
+      <div class="modal-content" id="modal-candidate-body">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+  </div>
 
   <!-- Market Detail Modal -->
   <div id="market-modal" class="modal-overlay hidden">
@@ -344,8 +903,8 @@
   </div>
 
   <footer class="app-footer">
-    <span>Kalshi Arbitrage Engine &bull; Read-Only Terminal V1.1 &bull; Deterministic Strategy</span>
-    <span id="footer-server-time" class="font-mono">UTC: —</span>
+    <span>Kalshi Arbitrage Engine &bull; Live Monitoring Terminal V23 &bull; Read-Only Research Interface</span>
+    <span id="footer-server-time" class="font-mono">Server UTC: —</span>
   </footer>
 
   <script src="/dashboard.js"></script>

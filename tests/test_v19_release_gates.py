@@ -57,6 +57,7 @@ def test_rest_client_read_only_boundary():
         "get_event",
         "list_markets",
         "list_events",
+        "close",
     }
     assert set(methods) == allowed_methods
     # Verify no order placement or mutation methods exist

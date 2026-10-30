@@ -9,7 +9,7 @@ import json
 import logging
 from pathlib import Path
 import threading
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 from urllib.parse import parse_qs, urlparse
 
 from .service import DashboardDataService
@@ -44,7 +44,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         # API Endpoints
         dataset_id = query.get("dataset", [None])[0]
 
-        if path == "/api/status":
+        if path in ("/api/status", "/api/health"):
             health = self.service.get_system_health()
             self._send_json(200, health)
             return
@@ -88,6 +88,156 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         elif path in ("/api/paper", "/api/paper/status"):
             paper_status = self.service.get_paper_trading_status()
             self._send_json(200, paper_status)
+            return
+
+        elif path in ("/api/collector", "/api/collector/status"):
+            collector_status = self.service.get_continuous_collector_status()
+            self._send_json(200, collector_status)
+            return
+
+        elif path in ("/api/evaluator", "/api/evaluator/status"):
+            evaluator_status = self.service.get_continuous_evaluator_status()
+            self._send_json(200, evaluator_status)
+            return
+
+        elif path in ("/api/live/summary", "/api/pipeline/summary"):
+            summary = self.service.get_live_pipeline_summary()
+            self._send_json(200, summary)
+            return
+
+        elif path in ("/api/evaluator/candidates", "/api/candidates"):
+            strategy = query.get("strategy", [None])[0]
+            outcome = query.get("outcome", [None])[0]
+            state = query.get("state", [None])[0]
+            market = query.get("market", [None])[0]
+            is_qual_raw = query.get("qualified", [None])[0]
+            is_qual = is_qual_raw.lower() in ("true", "1") if is_qual_raw is not None else None
+            candidates = self.service.get_continuous_evaluator_candidates(
+                strategy=strategy,
+                outcome=outcome,
+                state=state,
+                market=market,
+                is_qualified=is_qual,
+            )
+            self._send_json(200, {"candidates": candidates, "count": len(candidates)})
+            return
+
+        elif path in ("/api/evaluator/qualified", "/api/qualified"):
+            strategy = query.get("strategy", [None])[0]
+            market = query.get("market", [None])[0]
+            min_p = query.get("min_profit", [None])[0]
+            min_profit_cents = int(min_p) if min_p and min_p.isdigit() else None
+            qualified = self.service.get_continuous_evaluator_qualified_candidates(
+                strategy=strategy,
+                market=market,
+                min_profit_cents=min_profit_cents,
+            )
+            self._send_json(200, {"qualified_candidates": qualified, "count": len(qualified)})
+            return
+
+        elif path in ("/api/evaluator/history",):
+            limit_str = query.get("limit", ["100"])[0]
+            try:
+                limit = max(1, min(1000, int(limit_str)))
+            except ValueError:
+                limit = 100
+            candidate_id = query.get("candidate_id", [None])[0]
+            to_state = query.get("to_state", [None])[0]
+            outcome = query.get("outcome", [None])[0]
+            history = self.service.get_continuous_evaluator_history(
+                limit=limit,
+                candidate_id=candidate_id,
+                to_state=to_state,
+                outcome=outcome,
+            )
+            self._send_json(200, {"history": history, "count": len(history)})
+            return
+
+        elif path in ("/api/alerts", "/api/alerts/status"):
+            alert_status = self.service.get_alert_service_status()
+            self._send_json(200, alert_status)
+            return
+
+        elif path in ("/api/alerts/history",):
+            limit_str = query.get("limit", ["50"])[0]
+            try:
+                limit = max(1, min(500, int(limit_str)))
+            except ValueError:
+                limit = 50
+            event_type = query.get("event_type", [None])[0]
+            candidate_id = query.get("candidate_id", [None])[0]
+            alerts = self.service.get_alert_history(
+                limit=limit,
+                event_type=event_type,
+                candidate_id=candidate_id,
+            )
+            self._send_json(200, {"alerts": alerts, "count": len(alerts)})
+            return
+
+        elif path in ("/api/scanner/status", "/api/breadth/status"):
+            scanner_dir = query.get("dir", [None])[0] or query.get("scanner_dir", [None])[0]
+            scanner_status = self.service.get_breadth_scanner_status(scanner_dir=scanner_dir)
+            self._send_json(200, scanner_status)
+            return
+
+        elif path in ("/api/scanner/strategies", "/api/breadth/strategies"):
+            scanner_dir = query.get("dir", [None])[0] or query.get("scanner_dir", [None])[0]
+            strat_summary = self.service.get_breadth_scanner_strategy_breakdown(scanner_dir=scanner_dir)
+            self._send_json(200, strat_summary)
+            return
+
+        elif path in ("/api/scanner/summaries", "/api/breadth/summaries"):
+            scanner_dir = query.get("dir", [None])[0] or query.get("scanner_dir", [None])[0]
+            limit_str = query.get("limit", ["50"])[0]
+            try:
+                limit = max(1, min(500, int(limit_str)))
+            except ValueError:
+                limit = 50
+            summaries = self.service.get_breadth_scanner_summaries(scanner_dir=scanner_dir, limit=limit)
+            self._send_json(200, {"summaries": summaries, "count": len(summaries)})
+            return
+
+        elif path in ("/api/scanner/candidates", "/api/breadth/candidates"):
+            scanner_dir = query.get("dir", [None])[0] or query.get("scanner_dir", [None])[0]
+            limit_str = query.get("limit", ["100"])[0]
+            try:
+                limit = max(1, min(1000, int(limit_str)))
+            except ValueError:
+                limit = 100
+            strategy = query.get("strategy", [None])[0]
+            cycle_raw = query.get("cycle", [None])[0]
+            cycle = int(cycle_raw) if cycle_raw and cycle_raw.isdigit() else None
+            candidates = self.service.get_breadth_scanner_candidates(
+                scanner_dir=scanner_dir,
+                limit=limit,
+                strategy=strategy,
+                cycle_number=cycle,
+            )
+            self._send_json(200, {"candidates": candidates, "count": len(candidates)})
+            return
+
+        elif path in ("/api/scanner/qualifications", "/api/breadth/qualifications"):
+            scanner_dir = query.get("dir", [None])[0] or query.get("scanner_dir", [None])[0]
+            limit_str = query.get("limit", ["100"])[0]
+            try:
+                limit = max(1, min(1000, int(limit_str)))
+            except ValueError:
+                limit = 100
+            strategy = query.get("strategy", [None])[0]
+            outcome = query.get("outcome", [None])[0]
+            is_qual_raw = query.get("qualified", [None])[0]
+            is_qual = is_qual_raw.lower() in ("true", "1") if is_qual_raw is not None else None
+            cycle_raw = query.get("cycle", [None])[0]
+            cycle = int(cycle_raw) if cycle_raw and cycle_raw.isdigit() else None
+            qualifications = self.service.get_breadth_scanner_qualifications(
+                scanner_dir=scanner_dir,
+                limit=limit,
+                strategy=strategy,
+                outcome=outcome,
+                is_qualified=is_qual,
+                cycle_number=cycle,
+            )
+            self._send_json(200, {"qualifications": qualifications, "count": len(qualifications)})
             return
 
         elif path == "/api/datasets":
@@ -144,16 +294,18 @@ class DashboardServer:
         host: str = "127.0.0.1",
         port: int = 8080,
         workspace_root: Optional[Path] = None,
+        scanner_dir: Optional[Union[str, Path]] = None,
     ) -> None:
         self.host = host
         self.port = port
         self.workspace_root = workspace_root
+        self.scanner_dir = scanner_dir
 
-        # Configure handler service with workspace root
-        if workspace_root:
-            DashboardRequestHandler.service = DashboardDataService(workspace_root=workspace_root)
-        else:
-            DashboardRequestHandler.service = DashboardDataService()
+        # Configure handler service with workspace root and optional scanner directory
+        DashboardRequestHandler.service = DashboardDataService(
+            workspace_root=workspace_root,
+            default_scanner_dir=scanner_dir,
+        )
 
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -165,7 +317,7 @@ class DashboardServer:
         while current_port < self.port + 50:
             try:
                 self._server = HTTPServer((self.host, current_port), DashboardRequestHandler)
-                self.port = current_port
+                self.port = self._server.server_port
                 break
             except OSError as exc:
                 if "Address already in use" in str(exc):
@@ -205,11 +357,21 @@ class DashboardServer:
     def url(self) -> str:
         return f"http://{self.host}:{self.port}"
 
+    @property
+    def service(self) -> DashboardDataService:
+        return DashboardRequestHandler.service
+
 
 def create_dashboard_server(
     host: str = "127.0.0.1",
     port: int = 8080,
     workspace_root: Optional[Path] = None,
+    scanner_dir: Optional[Union[str, Path]] = None,
 ) -> DashboardServer:
     """Factory function for DashboardServer."""
-    return DashboardServer(host=host, port=port, workspace_root=workspace_root)
+    return DashboardServer(
+        host=host,
+        port=port,
+        workspace_root=workspace_root,
+        scanner_dir=scanner_dir,
+    )

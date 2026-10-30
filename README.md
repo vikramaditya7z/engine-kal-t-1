@@ -1,6 +1,6 @@
 # Kalshi Arbitrage Engine
 
-A deterministic quantitative research, market microstructure simulation, and empirical evaluation engine for Kalshi prediction markets (Milestones V0–V19).
+A deterministic quantitative research, market microstructure simulation, and empirical evaluation engine for Kalshi prediction markets (Milestones V0–V25).
 
 > **IMPORTANT REGULATORY & SAFETY NOTICE:**
 > This repository is strictly a **quantitative research, market observation, and paper-trading evaluation system**. It connects exclusively to read-only public REST market data endpoints. **It contains zero capabilities for real-money execution, live order routing, exchange credential handling, or deposit/withdrawal interactions.** All trading evaluations and settlements occur in deterministic simulation ledgers with exact integer-cent double-entry accounting reconciliation.
@@ -41,12 +41,17 @@ flowchart TD
 - **`kalshi_arbitrage/attribution.py`:** Two-sided (Long YES and Long NO) economic attribution engine verifying microstructure invariants and failure causes.
 - **`kalshi_arbitrage/execution.py`:** Full order-book depth traversal, volume-weighted average price (VWAP) calculation, and multi-leg bottleneck sizing.
 - **`kalshi_arbitrage/fee_model.py`:** Exact implementation of Kalshi's CFTC-regulated quadratic taker and maker fee formulas.
-- **`kalshi_arbitrage/episode_tracker.py`:** Cryptographic fingerprinting tracking evolving opportunity episodes across repeated market states.
-- **`kalshi_arbitrage/ws_streaming.py`:** Protocol implementation for Kalshi WebSocket v2 market-data synchronization with local L2 order books (verified via hermetic simulation fixtures).
+- **`kalshi_arbitrage/continuous_collector.py`:** Continuous live market data collection service with concurrency and backoff.
+- **`kalshi_arbitrage/continuous_evaluator.py`:** Continuous live candidate detection and lifecycle state tracking.
+- **`kalshi_arbitrage/execution_qualifier.py`:** Deterministic execution-aware qualification engine evaluating order-book depth, multi-leg bottlenecks, and CFTC quadratic taker fees.
+- **`kalshi_arbitrage/breadth_scanner.py`:** Standalone Breadth-First Scanner decoupling Stage A (catalog discovery), Stage B (zero-API candidate screening), and Stage C (bounded targeted order-book qualification).
+- **`kalshi_arbitrage/historical_opportunity_tracker.py`:** Deep historical analytics engine calculating candidate lifetime, persistence across cycles, qualification funnels, false-positive forensics, and category concentration.
+- **`kalshi_arbitrage/alert_engine.py`:** Asynchronous alert dispatch, persistent deduplication, material-change filtering, secret redaction, and multi-channel notifications.
+- **`kalshi_arbitrage/dashboard/`:** Live monitoring terminal and read-only REST APIs visualizing pipeline health, breadth scanner progress, candidate lifecycle transitions, and opportunity alert streams.
 
 ---
 
-## 3. Implemented & Verified Capabilities (V0–V19)
+## 3. Implemented & Verified Capabilities (V0–V25 & Phase 2F Breadth Scanner)
 
 | Capability Area | Implemented Functionality | Verification Status |
 | :--- | :--- | :--- |
@@ -63,6 +68,14 @@ flowchart TD
 | **Evidence Provenance** | Atomic writes, schema versioning ("1.0", "1.1"), byte-level SHA-256 manifests. | 100% manifest verification pass |
 | **Paper Ledger** | Append-only double-entry ledger, solvency invariants, pre-trade risk controls. | Verified with adversarial tests |
 | **Packaging & Setup** | Zero external runtime dependencies; standard-library-only implementation. | Verified in clean isolated virtualenv |
+| **Continuous Live Ingestion (V20)** | Long-running live REST collector, backoff, pacing, thread-safe deduplication, telemetry APIs. | Verified on live Kalshi public API |
+| **Continuous Detection (V21)** | Real-time candidate detection, lifecycle state management (NEW/UPDATED/DISQUALIFIED/INVALIDATED/DISAPPEARED), change fingerprinting. | Verified across 658 automated tests |
+| **Execution Qualification (V22)** | Realistic depth traversal, multi-leg bottleneck sizing, CFTC quadratic fees per leg, explicit rejection taxonomy. | Verified across 677 automated tests |
+| **Live Dashboard Integration (V23)** | Real-time pipeline monitoring, V22 qualified opportunity display, candidate rejections audit, auto-refresh with collision guard, Page Visibility suspension, strict provenance separation (LIVE / HISTORICAL / SIMULATION). | Verified across 691 automated tests |
+| **Alerts & Reliability (V24)** | Qualified-only opportunity alerts, persistent deduplication across daemon restarts, material-change filtering, re-alert cooldown, multi-channel dispatch (local history, macOS desktop, webhook), strict secret redaction, and bounded queues. | Verified across 706 automated tests |
+| **Extended Live Validation (V25)** | Full continuous pipeline live trial under real market conditions, 9 automated fault-injection recovery scenarios, mathematical execution qualification reconciliation, and SHA-256 evidence manifest. | Verified across 719 automated tests |
+| **Breadth-First Scanner (Phase 2F)** | Full-catalog pagination (168k+ markets), Stage B zero-API screening (364k+ strategies in 2.4s), constituent leg gating ($\le 8$ legs), global token bucket rate limiting (5 req/s), connection pooling, and decoupled quote staleness. | Verified across 946 automated tests |
+| **Historical Opportunity Tracking** | Deep historical analytics engine calculating candidate lifetime, multi-cycle persistence, qualification funnels, fee haircuts, and market concentration across all persisted datasets. | Verified with real trial datasets |
 
 ---
 
@@ -87,8 +100,18 @@ $$\sum_{i=1}^N \text{Bid}_{\text{YES}, i} \le 100¢ \le \sum_{i=1}^N \text{Ask}_
 ### 3. Tail-Risk Asymmetry (Long NO Bottleneck)
 In multi-outcome events, deep out-of-the-money legs (e.g. extreme rate cuts) have resting asks at 1¢, but **zero resting bids** (`Bid = None`). Because buying NO contracts consumes NO asks (which derive from resting YES bids: $\text{Ask}_{\text{NO}} = 100 - \text{Bid}_{\text{YES}}$), a missing YES bid results in **zero executable depth** for Long NO baskets.
 
-### 4. Absence of Static Arbitrage
-**Zero qualified arbitrage opportunities were observed across all 120+ reconstructed snapshots.** Resting limit order books do not contain unhedged mispricings during continuous trading.
+### 4. Absence of Static Arbitrage in Liquid Markets
+**Zero qualified arbitrage opportunities were observed across all 120+ reconstructed snapshots in liquid financial/economic markets.** Resting limit order books in active series like `KXINX`, `KXNASDAQ100`, and `KXFEDDECISION` do not contain unhedged mispricings during continuous trading.
+
+### 5. Phase 2F Full-Catalog Breadth Scanner Trials & Opportunity Discovery
+During Phase 2F full-catalog discovery across 168,000+ contracts, the engine demonstrated:
+- **Trial 1 (1-Hour Continuous):** Screened 168,097 markets across 16,455 events; identified Stage B screening metadata staleness.
+- **Trial 2 (15-Minute Controlled):** Verified Stage B correction, producing 10 preliminary candidates and proving connection pooling (4x latency drop). Identified event pre-filter catalog timestamp staleness.
+- **Final Validation Trial:** Decoupled pre-filter quote staleness. The qualifier dispatched 212 API requests across 8 candidates, rejecting 2 by leg gating ($> 8$ legs), 3 due to quotes moving, 4 due to CFTC regulatory fee floors, and successfully qualified **1 execution-viable MECE arbitrage opportunity** (`MECE-YES:KXMODELHIGH-27-1550` with 24¢ gross edge, 9¢ CFTC fees, 15¢ net profit, and 19.74% ROC).
+- For complete forensic reconstruction, contract settlement evaluation, and the final economic validation research verdict, see:
+  - **[`docs/FINAL_ECONOMIC_VALIDATION_REPORT.md`](file:///Users/vikramaditya/Disk/Projects/Kalshi/docs/FINAL_ECONOMIC_VALIDATION_REPORT.md)** (Final economic validation, contract rule investigation, and paper-trading verdict)
+  - **[`docs/FINAL_OPPORTUNITY_VERIFICATION_AND_RESEARCH_REPORT.md`](file:///Users/vikramaditya/Disk/Projects/Kalshi/docs/FINAL_OPPORTUNITY_VERIFICATION_AND_RESEARCH_REPORT.md)**
+  - **[`docs/FINAL_PROJECT_COMPLETION_REPORT.md`](file:///Users/vikramaditya/Disk/Projects/Kalshi/docs/FINAL_PROJECT_COMPLETION_REPORT.md)**
 
 ---
 
@@ -128,7 +151,7 @@ pip install -e ".[dev]"
 ### 6.3 Running Tests
 
 ```bash
-# Run the complete test suite (628 tests)
+# Run the complete test suite (946 tests)
 pytest
 
 # Run tests in quiet mode
@@ -170,6 +193,121 @@ python scripts/evaluate_v18.py \
   --cycles 10 \
   --cycle-interval 2.0 \
   --concurrency 8
+```
+
+### 6.6 Running the Continuous Live Market Data Service (V20)
+
+```bash
+# Run the continuous live market data collector (runs indefinitely until Ctrl+C)
+python scripts/run_continuous_collector.py \
+  --environment production \
+  --interval 2.0 \
+  --concurrency 4 \
+  --max-markets 30 \
+  --output-dir data/live_collection
+
+# Or monitor specific market tickers:
+python scripts/run_continuous_collector.py \
+  --tickers KXFEDDECISION-26OCT-T4.50 KXFEDDECISION-26OCT-T4.75 \
+  --interval 1.0
+
+# Graceful shutdown:
+# Press Ctrl+C or send SIGTERM (in-flight cycles finish cleanly, writing manifest and state)
+```
+
+### 6.7 Running the Live Monitoring & Research Dashboard (V23)
+
+```bash
+# Start read-only HTTP live dashboard terminal on http://127.0.0.1:8080
+python scripts/run_dashboard.py --port 8080
+
+# Key live dashboard endpoints:
+# GET http://127.0.0.1:8080/                      (Interactive web terminal UI)
+# GET http://127.0.0.1:8080/api/live/summary      (Unified pipeline status, health, and error tracking)
+# GET http://127.0.0.1:8080/api/evaluator/qualified (V22 execution-qualified opportunities)
+# GET http://127.0.0.1:8080/api/evaluator/candidates (Active candidates with outcome filters)
+# GET http://127.0.0.1:8080/api/evaluator/history   (Candidate lifecycle transition history)
+# GET http://127.0.0.1:8080/api/alerts/status     (Opportunity alert engine operational status)
+# GET http://127.0.0.1:8080/api/alerts/history    (Opportunity alert history log)
+# GET http://127.0.0.1:8080/api/collector/status  (Continuous collector health and telemetry)
+# GET http://127.0.0.1:8080/api/evaluator/status  (Continuous evaluator health and telemetry)
+# GET http://127.0.0.1:8080/api/status            (Comprehensive system-wide diagnostics)
+```
+
+### 6.8 Running the Continuous Live Arbitrage Detector & Alert Engine (V21–V24)
+
+```bash
+# Evaluate fresh observations with asynchronous qualified-opportunity alerts:
+python scripts/run_continuous_evaluator.py \
+  --observations-file data/live_collection/observations.jsonl \
+  --alerts-enabled
+
+# Deliver alerts via webhook with custom thresholds:
+python scripts/run_continuous_evaluator.py \
+  --observations-file data/live_collection/observations.jsonl \
+  --webhook-url "https://discord.com/api/webhooks/YOUR_WEBHOOK" \
+  --profit-change-threshold 5 \
+  --quantity-change-threshold 1
+
+# Deliver native desktop notifications on macOS:
+python scripts/run_continuous_evaluator.py \
+  --observations-file data/live_collection/observations.jsonl \
+  --desktop-alerts
+
+# Run in pure evaluation mode with alerts disabled:
+python scripts/run_continuous_evaluator.py --no-alerts
+```
+
+### 6.9 Running the End-to-End Live Validation Runner (V25)
+
+```bash
+# Execute the complete sustained live validation trial with pre-flight check,
+# continuous ingestion, evaluation, live dashboard, 9 fault scenarios, and SHA-256 evidence:
+python scripts/run_live_validation.py \
+  --duration 60 \
+  --interval 2.0 \
+  --max-markets 5 \
+  --port 8089 \
+  --output-dir data/v25_validation_evidence
+```
+
+### 6.10 Running the Breadth-First Arbitrage Scanner (Phase 2F)
+
+```bash
+# Run a bounded, single-pass breadth-first scan across all active Kalshi markets:
+python scripts/run_breadth_scanner.py \
+  --single-pass \
+  --request-rate 5.0 \
+  --concurrency 4 \
+  --max-candidate-legs 8 \
+  --min-net-profit 5 \
+  --output-dir data/breadth_scanner/my_scan
+
+# Run a continuous scanner session with a 1-hour maximum duration and lookahead gating:
+python scripts/run_breadth_scanner.py \
+  --duration 3600 \
+  --interval 30.0 \
+  --request-rate 5.0 \
+  --concurrency 4 \
+  --max-candidate-legs 8 \
+  --min-net-profit 5 \
+  --output-dir data/breadth_scanner/session_1hour
+```
+
+### 6.11 Running Historical Opportunity Analytics & Replay
+
+```python
+from kalshi_arbitrage.historical_opportunity_tracker import HistoricalOpportunityTracker
+
+# Analyze a persisted scanner session dataset:
+tracker = HistoricalOpportunityTracker("data/breadth_scanner/trial_validation_final")
+report = tracker.analyze()
+
+print(f"Total Cycles: {report.total_cycles}")
+print(f"Preliminary Candidates: {report.total_preliminary_candidates}")
+print(f"Qualified Arbitrages: {report.total_qualified_candidates}")
+print(f"Rejection Breakdown: {report.rejection_breakdown}")
+print(f"Category Concentration: {report.category_concentration}")
 ```
 
 ---
