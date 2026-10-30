@@ -44,7 +44,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         # API Endpoints
         dataset_id = query.get("dataset", [None])[0]
 
-        if path in ("/api/status", "/api/health"):
+        if path in ("/api/status", "/api/health", "/api/system/health"):
             health = self.service.get_system_health()
             self._send_json(200, health)
             return
@@ -56,7 +56,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/markets":
             markets = self.service.get_markets_table(dataset_id)
-            self._send_json(200, {"markets": markets, "count": len(markets)})
+            meta = self.service.get_markets_metadata(dataset_id)
+            resp = {"markets": markets, "count": len(markets)}
+            resp.update(meta)
+            self._send_json(200, resp)
             return
 
         elif path == "/api/opportunities":
@@ -172,6 +175,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 candidate_id=candidate_id,
             )
             self._send_json(200, {"alerts": alerts, "count": len(alerts)})
+            return
+
+        elif path in ("/api/scanner/sessions", "/api/breadth/sessions"):
+            sessions = self.service.get_breadth_scanner_sessions()
+            self._send_json(200, {"sessions": sessions, "count": len(sessions)})
             return
 
         elif path in ("/api/scanner/status", "/api/breadth/status"):

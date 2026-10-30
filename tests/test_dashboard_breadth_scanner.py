@@ -870,3 +870,37 @@ def test_catalog_completeness_vs_telemetry_freshness():
     assert any("stale" in w.lower() for w in warnings)
 
 
+def test_get_breadth_scanner_sessions():
+    """Verify that DashboardDataService enumerates valid breadth scanner trial sessions."""
+    workspace = Path(__file__).resolve().parents[1]
+    service = DashboardDataService(workspace_root=workspace)
+    sessions = service.get_breadth_scanner_sessions()
+
+    assert isinstance(sessions, list)
+    assert len(sessions) > 0
+    first = sessions[0]
+    assert "id" in first
+    assert "path" in first
+    assert "display_name" in first
+
+
+def test_api_scanner_sessions_endpoint():
+    """Verify that /api/scanner/sessions returns 200 with session catalog."""
+    workspace = Path(__file__).resolve().parents[1]
+    server = create_dashboard_server(host="127.0.0.1", port=0, workspace_root=workspace)
+    server.start()
+    base_url = f"http://127.0.0.1:{server.port}"
+
+    try:
+        req = urllib.request.Request(f"{base_url}/api/scanner/sessions")
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode())
+            assert "sessions" in data
+            assert isinstance(data["sessions"], list)
+            assert len(data["sessions"]) > 0
+    finally:
+        server.stop()
+
+
+

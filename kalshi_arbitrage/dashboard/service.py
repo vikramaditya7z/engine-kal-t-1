@@ -377,6 +377,9 @@ class DashboardDataService:
             "theoretical_candidates_count": theoretical_candidates,
             "qualified_opportunities_count": qualified_opportunities,
             "rejected_opportunities_count": rejected_opportunities,
+            "collector_process": self.get_continuous_collector_process_status(),
+            "evaluator_process": self.get_continuous_evaluator_process_status(),
+            "scanner_process": self.get_breadth_scanner_process_status(),
         }
 
     def get_markets_table(self, dataset_identifier: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -446,6 +449,38 @@ class DashboardDataService:
             })
 
         return results
+
+    def get_markets_metadata(self, dataset_identifier: Optional[str] = None) -> Dict[str, Any]:
+        """Return reconciled status counts and temporal metadata for the markets dataset."""
+        dataset_path = self.resolve_dataset_path(dataset_identifier)
+        observations, _, _ = self.load_observations(dataset_path)
+
+        latest_dt: Optional[datetime] = None
+        for obs in observations:
+            if latest_dt is None or obs.observed_at > latest_dt:
+                latest_dt = obs.observed_at
+
+        coll_status = self.get_continuous_collector_status()
+        is_coll_running = coll_status.get("process_running", False)
+        now = datetime.now(timezone.utc)
+        age_seconds = max(0.0, (now - latest_dt).total_seconds()) if latest_dt else None
+        is_live = is_coll_running and (age_seconds is not None and age_seconds <= 60.0)
+
+        markets = self.get_markets_table(dataset_identifier)
+        counts = {"ALL": len(markets), "POPULATED": 0, "EMPTY": 0, "STALE": 0, "INVALID": 0}
+        for m in markets:
+            st = m.get("order_book_status", "EMPTY")
+            counts[st] = counts.get(st, 0) + 1
+
+        return {
+            "total_markets": len(markets),
+            "counts_by_status": counts,
+            "latest_observation_at": _safe_iso(latest_dt),
+            "latest_observation_age_seconds": age_seconds,
+            "collector_running": is_coll_running,
+            "is_live_stream": is_live,
+            "provenance_label": "LIVE STREAM" if is_live else "PERSISTED SNAPSHOT",
+        }
 
     def get_opportunities(
         self,
@@ -589,6 +624,34 @@ class DashboardDataService:
             report_dict = report.to_dict()
             report_dict["human_summary"] = report.summary()
             report_dict["exists"] = True
+
+            # Populate convenience aliases for frontend rendering
+            s1 = report_dict.get("section_1_dataset_identity", {})
+            s2 = report_dict.get("section_2_evidence_quality", {})
+
+            if "time_span_seconds" in s1 and "total_duration" not in s1:
+                secs = s1.get("time_span_seconds") or 0.0
+                if secs < 60:
+                    s1["total_duration"] = f"{secs:.1f}s"
+                elif secs < 3600:
+                    s1["total_duration"] = f"{secs/60:.1f}m"
+                else:
+                    s1["total_duration"] = f"{secs/3600:.1f}h"
+
+            if "fresh_records_count" in s2 and "valid_records_count" in s2:
+                total_val = s2.get("valid_records_count", 0)
+                fresh_val = s2.get("fresh_records_count", 0)
+                rate = (fresh_val / total_val * 100.0) if total_val > 0 else 100.0
+                s2["freshness_pass_rate"] = f"{rate:.1f}%"
+
+            if "empty_books_count" in s2:
+                s2["empty_books"] = s2.get("empty_books_count", 0)
+                total_val = s2.get("valid_records_count", 0)
+                s2["empty_books_pct"] = round((s2["empty_books"] / total_val * 100.0), 1) if total_val > 0 else 0.0
+
+            if "total_bid_depth_contracts" in s2:
+                s2["total_cumulative_bid_depth"] = f"{s2.get('total_bid_depth_contracts', 0)} contracts"
+
             return report_dict
         except Exception as exc:
             logger.exception(f"Error executing V7 validation: {exc}")
@@ -793,7 +856,10 @@ class DashboardDataService:
             res.update({
                 "status": status_label,
                 "process_running": is_proc_running,
+                "is_running": is_proc_running,
                 "process_pid": proc_status.get("pid"),
+                "pid": proc_status.get("pid"),
+                "persisted_pid": data.get("pid"),
                 "latest_snapshot_age_seconds": snapshot_age,
                 "is_data_fresh": is_fresh,
                 "state_file": str(path),
@@ -881,7 +947,10 @@ class DashboardDataService:
             res.update({
                 "status": status_label,
                 "process_running": is_proc_running,
+                "is_running": is_proc_running,
                 "process_pid": proc_status.get("pid"),
+                "pid": proc_status.get("pid"),
+                "persisted_pid": data.get("pid"),
                 "state_file": str(path),
             })
             return res
@@ -1328,7 +1397,15 @@ class DashboardDataService:
         """Resolve breadth scanner directory from argument, instance default, env, or project default."""
         if scanner_dir is not None:
             p = Path(scanner_dir)
-            return p if p.is_absolute() else (self.workspace_root / p)
+            if p.is_absolute():
+                return p
+            direct = self.workspace_root / p
+            if direct.exists():
+                return direct
+            nested = self.workspace_root / "data" / "breadth_scanner" / p
+            if nested.exists():
+                return nested
+            return direct
         if self.default_scanner_dir is not None:
             return (
                 self.default_scanner_dir
@@ -1339,7 +1416,59 @@ class DashboardDataService:
         if env_dir:
             p = Path(env_dir)
             return p if p.is_absolute() else (self.workspace_root / p)
-        return self.workspace_root / "data" / "breadth_scanner"
+
+        # Default: locate latest valid session directory under data/breadth_scanner/
+        base = self.workspace_root / "data" / "breadth_scanner"
+        if base.exists():
+            candidates = []
+            for child in base.iterdir():
+                state_file = child / "scanner_state.json"
+                if child.is_dir() and state_file.exists():
+                    try:
+                        candidates.append((child, state_file.stat().st_mtime))
+                    except Exception:
+                        pass
+            if candidates:
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                return candidates[0][0]
+
+        return base
+
+    def get_breadth_scanner_sessions(self) -> List[Dict[str, Any]]:
+        """Discover all completed or active breadth scanner trial sessions."""
+        base = self.workspace_root / "data" / "breadth_scanner"
+        if not base.exists():
+            return []
+
+        sessions = []
+        for child in base.iterdir():
+            state_file = child / "scanner_state.json"
+            if child.is_dir() and state_file.exists():
+                try:
+                    with open(state_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    stat = state_file.stat()
+                    sessions.append({
+                        "id": child.name,
+                        "name": child.name,
+                        "display_name": child.name,
+                        "path": str(child),
+                        "session_id": data.get("session_id"),
+                        "status": data.get("status", "STOPPED"),
+                        "updated_at": data.get("updated_at") or data.get("last_persistence_time"),
+                        "mtime": stat.st_mtime,
+                        "mtime_iso": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                        "total_unique_markets_discovered": data.get("total_unique_markets_discovered", 0),
+                        "total_strategies_evaluated": data.get("total_strategies_evaluated", 0),
+                        "qualified_candidates_count": data.get("qualified_candidates_count", 0),
+                    })
+                except Exception as exc:
+                    logger.warning(f"Error inspecting scanner session in {child}: {exc}")
+
+        sessions.sort(key=lambda s: s["mtime"], reverse=True)
+        if sessions:
+            sessions[0]["is_latest"] = True
+        return sessions
 
     def get_breadth_scanner_status(
         self,
@@ -1488,7 +1617,10 @@ class DashboardDataService:
             res.update({
                 "status": status_label,
                 "process_running": is_proc_running,
+                "is_running": is_proc_running,
                 "process_pid": proc_status.get("pid"),
+                "pid": proc_status.get("pid"),
+                "persisted_pid": data.get("pid"),
                 "staleness_seconds": staleness_seconds,
                 "is_stale": is_stale,
                 "is_data_fresh": is_fresh,
