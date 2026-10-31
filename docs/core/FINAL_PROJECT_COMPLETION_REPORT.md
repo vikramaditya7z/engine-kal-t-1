@@ -275,7 +275,7 @@ The platform provides a complete, mathematically sound, and empirically verified
 
 For the exhaustive independent reconstruction of the qualified opportunity (`MECE-YES:KXMODELHIGH-27-1550`), contract settlement evaluation, conservative execution scenarios, cross-trial historical persistence, and final research closure, consult:
 
-- **[`docs/FINAL_ECONOMIC_VALIDATION_REPORT.md`](file:///Users/vikramaditya/Disk/Projects/Kalshi/docs/FINAL_ECONOMIC_VALIDATION_REPORT.md)** (Final economic validation, contract rule investigation, and paper-trading verdict)
-- **[`docs/FINAL_OPPORTUNITY_VERIFICATION_AND_RESEARCH_REPORT.md`](file:///Users/vikramaditya/Disk/Projects/Kalshi/docs/FINAL_OPPORTUNITY_VERIFICATION_AND_RESEARCH_REPORT.md)**
+- **[`FINAL_ECONOMIC_VALIDATION_REPORT.md`](FINAL_ECONOMIC_VALIDATION_REPORT.md)** (Final economic validation, contract rule investigation, and paper-trading verdict)
+- **[`FINAL_OPPORTUNITY_VERIFICATION_AND_RESEARCH_REPORT.md`](FINAL_OPPORTUNITY_VERIFICATION_AND_RESEARCH_REPORT.md)** (Independent mathematical reconstruction, fee verification, and research closure)
 
-The engine stands fully documented, 100% verified by 946 automated unit tests, and ready for long-term quantitative research and historical replay analysis.
+The engine stands fully documented, 100% verified by 953 automated unit tests, and ready for long-term quantitative research and historical replay analysis.

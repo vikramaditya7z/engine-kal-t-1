@@ -1,13 +1,18 @@
 # Local environments and secrets
 .venv/
+venv/
 .env
 .env.*
 !.env.example
 
-# Python caches and test artifacts
+# Python caches, build, and packaging artifacts
 __pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
+*.egg-info/
+build/
+dist/
 
 # macOS and local logs
 .DS_Store
@@ -18,9 +23,38 @@ __pycache__/
 *.sqlite
 *.sqlite3
 
-# Transient paper-trading runtime state and session reports
+# Local runtime daemon state and session reports
 data/paper_trading_state.json
 data/paper_session_report.json
 data/paper_session_restart_report.json
 data/audit_validation_state.json
 data/audit_validation_report.json
+data/live_*.json
+data/trial_*.json
+data/trial_*.jsonl
+data/v12_verify_eval_report.json
+
+# Local runtime outputs and reproduced replay caches
+data/live_collection/
+data/live_collection_test/
+data/breadth_scanner/
+data/v13_historical_replay_trial/
+data/v14_multi_basket_replay/
+data/v14_reproduced_fed_replay/
+data/v15_audit_reproduction/
+data/v18_audit_reproduction/
+data/v19_final_release_audit/
+data/v25_validation_evidence/
+
+# Local trial evidence logs and diagnostic dumps
+docs/v23_live_trial_evidence.json
+docs/v24_alerts_trial_evidence.json
+
+# Generated local-only historical trial directories (raw research evidence)
+evidence_production_trial/
+evidence_v12_*/
+evidence_v14_*/
+evidence_v16_*/
+evidence_v17_*/
+evidence_v18_*/
+test_evidence_run*/

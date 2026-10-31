@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "kalshi-arbitrage"
 version = "0.1.0"
 description = "Deterministic quantitative research and market data engine for Kalshi prediction markets"
-readme = "ARCHITECTURE.md"
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
 
